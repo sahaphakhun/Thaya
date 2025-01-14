@@ -1,9 +1,9 @@
 /*******************************************************
- * index.js (โค้ดเต็ม – ไม่ตัดทอน) 
+ * index.js (โค้ดเต็ม – มีการปรับให้สามารถส่งรูปไป gpt-4o-mini)
  * - ใช้ Express + body-parser (Webhook สำหรับ Facebook)
  * - MongoDB เก็บประวัติแชท (chat_history) และสถานะผู้ใช้ (active_user_status)
  * - ดึง systemInstructions จาก Google Docs + Google Sheets
- * - ใช้ OpenAI GPT ตอบ
+ * - ใช้ OpenAI GPT ตอบ (model: "gpt-4o-mini" สามารถวิเคราะห์รูปได้)
  * - มีฟังก์ชันปิดระบบเอไอ ([ปิดระบบเอไอ]/[เปิดระบบเอไอ])
  * - ไม่ตอบผู้ใช้ระหว่างปิด AI (แต่ยังบันทึกประวัติ)
  * - ป้องกัน Echo message (is_echo) ไม่ให้ตอบตัวเองซ้ำ
@@ -68,15 +68,16 @@ async function saveChatHistory(userId, userMsg, assistantMsg) {
   const db = client.db("chatbot");
   const coll = db.collection("chat_history");
 
-  // บันทึก user
+  // ถ้า userMsg เป็น object/array => แปลงเป็น string
+  let userMsgToSave = typeof userMsg === "object" ? JSON.stringify(userMsg) : userMsg;
+
   await coll.insertOne({
     senderId: userId,
     role: "user",
-    content: userMsg,
+    content: userMsgToSave,
     timestamp: new Date(),
   });
 
-  // บันทึก assistant
   await coll.insertOne({
     senderId: userId,
     role: "assistant",
@@ -196,7 +197,7 @@ function buildSystemInstructions() {
 
   // ผสานกับข้อความจาก Google Docs
   const finalSystemInstructions = `
-You are an AI chatbot for an THAYA. 
+You are an AI chatbot for THAYA. 
 Below are instructions from the Google Doc:
 ---
 ${googleDocInstructions}
@@ -214,25 +215,48 @@ Rules:
 }
 
 
-// ====================== 6) เรียก GPT ======================
-async function getAssistantResponse(systemInstructions, history, userMessage) {
+// ====================== 6) เรียก GPT (รองรับทั้งข้อความและรูป) ======================
+async function getAssistantResponse(systemInstructions, history, userContent) {
   try {
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+    // สร้าง messages เริ่มจาก system + ประวัติ
     const messages = [
       { role: "system", content: systemInstructions },
-      ...history,
-      { role: "user", content: userMessage },
+      // ประวัติ (map ให้เป็นรูปแบบ { role, content })
+      // หาก content ใน DB เป็น string ให้ใช้ตรง ๆ / ถ้าเป็น JSON string อาจต้อง parse ก่อน
+      ...history.map(h => {
+        // ลอง parse ดูเผื่อเป็น JSON (รูป) หาก parse ไม่ได้ก็เป็น text ธรรมดา
+        try {
+          const parsed = JSON.parse(h.content);
+          return { role: h.role, content: parsed };
+        } catch(e) {
+          return { role: h.role, content: h.content };
+        }
+      })
     ];
 
+    // push user message
+    // userContent อาจเป็น string หรือ array
+    if (typeof userContent === "string") {
+      messages.push({ role: "user", content: userContent });
+    } else {
+      messages.push({ role: "user", content: userContent });
+    }
+
+    // เรียกโมเดล
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
       temperature: 0.2,
     });
 
-    const assistantReply = response.choices[0].message.content.trim();
-    return assistantReply;
+    // ดึงข้อความของ assistant
+    const assistantReply = response.choices[0].message.content;
+    // ถ้าเป็น string ก็จะ .trim() ได้
+    return (typeof assistantReply === "string") 
+      ? assistantReply.trim()
+      : JSON.stringify(assistantReply);
 
   } catch (error) {
     console.error("Error getAssistantResponse:", error);
@@ -329,55 +353,32 @@ app.post('/webhook', async (req, res) => {
       // -----------------------------
       // A) ถ้าเป็น echo จากเพจเอง?
       // -----------------------------
-      //  - บางครั้ง ข้อความจากเพจที่ส่งออก จะวกกลับมาเป็น is_echo = true
-      //  - เราต้องดูว่าเป็นคำสั่ง [เอไอ]/[เปิดระบบเอไอ] หรือไม่
       if (webhookEvent.message && webhookEvent.message.is_echo) {
-        // ดึง userMsg
         const userMsg = webhookEvent.message.text || "";
-
-        // ถ้าเป็นคำสั่งปิดหรือเปิด 
+        
+        // ตรวจสอบคำสั่ง ปิด/เปิด ai
         if (userMsg === "สวัสดีค่า แอดมิน Venus นะคะ จะมาดำเนินเรื่องต่อ") {
-          // ต้องหา userId เพื่อ set aiEnabled
-          // ปกติ pageId = entry.id; แล้ว userId = webhookEvent.recipient.id
+          // ปิด ai
           const pageId = entry.id; 
-          let userId;
-          // ถ้า sender = pageId -> userId = recipient
-          if (webhookEvent.sender.id === pageId) {
-            userId = webhookEvent.recipient.id;
-          } else {
-            userId = webhookEvent.sender.id;
-          }
-
-          // set ให้ aiEnabled = false
+          let userId = (webhookEvent.sender.id === pageId) 
+            ? webhookEvent.recipient.id 
+            : webhookEvent.sender.id;
           await setUserStatus(userId, false);
-
-          // ตอบกลับเฉพาะตอนปิด
           sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
           await saveChatHistory(userId, userMsg, "แอดมิน Venus สวัสดีค่ะ");
-
-          // skip ไม่ต้องไปทำอย่างอื่น
           continue;
-        } 
-        else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
-          // เช่นเดียวกัน หา userId
+        } else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
+          // เปิด ai
           const pageId = entry.id; 
-          let userId;
-          if (webhookEvent.sender.id === pageId) {
-            userId = webhookEvent.recipient.id;
-          } else {
-            userId = webhookEvent.sender.id;
-          }
-
+          let userId = (webhookEvent.sender.id === pageId) 
+            ? webhookEvent.recipient.id 
+            : webhookEvent.sender.id;
           await setUserStatus(userId, true);
-
-          // ตอบกลับเฉพาะตอนเปิด
           sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
           await saveChatHistory(userId, userMsg, "แอดมิน Venus ขอตัวก่อนนะคะ");
-
           continue;
         }
 
-        // ถ้าไม่ใช่คำสั่ง => ข้ามไปเลย กัน echo อื่น ๆ
         console.log(">> [Webhook] Skip echo message from page (not an AI command).");
         continue;
       }
@@ -385,18 +386,12 @@ app.post('/webhook', async (req, res) => {
       // -----------------------------
       // B) หา userId สำหรับกรณีทั่วไป
       // -----------------------------
-      //   - pageId = entry.id
-      //   - ถ้า sender = pageId แปลว่าเพจเป็นคนส่ง => userId = recipient.id
-      //   - ถ้า sender != pageId แปลว่าผู้ใช้เป็นคนส่ง => userId = sender.id
       const pageId = entry.id; 
-      let userId;
-      if (webhookEvent.sender.id === pageId) {
-        userId = webhookEvent.recipient.id;
-      } else {
-        userId = webhookEvent.sender.id;
-      }
+      let userId = (webhookEvent.sender.id === pageId)
+        ? webhookEvent.recipient.id
+        : webhookEvent.sender.id;
 
-      // ดึงสถานะ aiEnabled ของ userId นี้
+      // ดึงสถานะ aiEnabled
       const userStatus = await getUserStatus(userId);
       const aiEnabled = userStatus.aiEnabled;
 
@@ -406,27 +401,26 @@ app.post('/webhook', async (req, res) => {
       if (webhookEvent.message && webhookEvent.message.text) {
         const userMsg = webhookEvent.message.text;
 
-        // (C.1) เช็กคำสั่ง [ปิดระบบเอไอ]/[เปิดระบบเอไอ] จากฝั่ง user จริง ๆ (ไม่ใช่ echo)
+        // เช็กคำสั่ง ปิด/เปิด ai
         if (userMsg === "สวัสดีค่า แอดมิน Venus นะคะ จะมาดำเนินเรื่องต่อ") {
           await setUserStatus(userId, false);
           sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
           await saveChatHistory(userId, userMsg, "แอดมิน Venus สวัสดีค่ะ");
           continue;
-        }
-        else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
+        } else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
           await setUserStatus(userId, true);
           sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
           await saveChatHistory(userId, userMsg, "แอดมิน Venus ขอตัวก่อนนะคะ");
           continue;
         }
 
-        // (C.2) ถ้า aiEnabled=false => ไม่ตอบ แต่บันทึกประวัติ
+        // ถ้า ai ถูกปิด
         if (!aiEnabled) {
           await saveChatHistory(userId, userMsg, "");
           continue;
         }
 
-        // (C.3) aiEnabled=true => เรียก GPT
+        // aiEnabled = true => เรียก GPT
         const history = await getChatHistory(userId);
         const systemInstructions = buildSystemInstructions();
         const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
@@ -439,28 +433,48 @@ app.post('/webhook', async (req, res) => {
       // -----------------------------
       } else if (webhookEvent.message && webhookEvent.message.attachments) {
         const attachments = webhookEvent.message.attachments;
-        const hasImage = attachments.some(a => a.type === 'image');
-        let userMsg = "**ลูกค้าส่งไฟล์แนบ**";
-        if (hasImage) {
-          userMsg = "**ลูกค้าส่งรูปมา**";
+
+        // สร้าง content array สำหรับผู้ใช้
+        let userContentArray = [{
+          type: "text",
+          text: "ผู้ใช้ส่งไฟล์แนบ",
+        }];
+
+        // วนลูป attachments
+        for (const att of attachments) {
+          if (att.type === 'image') {
+            // ดึง URL ของรูปจาก att.payload.url
+            userContentArray.push({
+              type: "image_url",
+              image_url: {
+                url: att.payload.url,
+                detail: "auto" // เปลี่ยนเป็น 'low'/'high' ได้
+              }
+            });
+          } else {
+            // ถ้าเป็นไฟล์อื่น (audio, video, location)
+            userContentArray.push({
+              type: "text",
+              text: `ไฟล์แนบประเภท: ${att.type} (ยังไม่รองรับส่งต่อเป็นรูป)`
+            });
+          }
         }
 
-        // (D.1) ถ้า aiEnabled=false => ไม่ตอบ
         if (!aiEnabled) {
-          await saveChatHistory(userId, userMsg, "");
+          // บันทึกอย่างเดียว
+          await saveChatHistory(userId, userContentArray, "");
           continue;
         }
 
-        // (D.2) aiEnabled=true => เรียก GPT
+        // aiEnabled = true => เรียก GPT
         const history = await getChatHistory(userId);
         const systemInstructions = buildSystemInstructions();
-        const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
+        const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
 
-        await saveChatHistory(userId, userMsg, assistantMsg);
+        await saveChatHistory(userId, userContentArray, assistantMsg);
         sendTextMessage(userId, assistantMsg);
 
       } else {
-        // ไม่ใช่ text/attachment => ข้าม
         console.log(">> [Webhook] Received event but not text/attachment:", webhookEvent);
       }
     }
@@ -468,7 +482,6 @@ app.post('/webhook', async (req, res) => {
     res.status(200).send("EVENT_RECEIVED");
 
   } else {
-    // ถ้าไม่ใช่ page event
     res.sendStatus(404);
   }
 });
