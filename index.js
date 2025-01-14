@@ -196,7 +196,7 @@ function buildSystemInstructions() {
 
   // ผสานกับข้อความจาก Google Docs
   const finalSystemInstructions = `
-You are an AI chatbot for an 10xproductivity course. 
+You are an AI chatbot for an THAYA. 
 Below are instructions from the Google Doc:
 ---
 ${googleDocInstructions}
