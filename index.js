@@ -8,6 +8,7 @@
  * - ไม่ตอบผู้ใช้ระหว่างปิด AI (แต่ยังบันทึกประวัติ)
  * - ป้องกัน Echo message (is_echo) ไม่ให้ตอบตัวเองซ้ำ
  * - ป้องกันการวนลูปซ้ำด้วยการเช็ก event (echo/delivery/read/app_id) และ message.mid
+ * - แยกข้อความตาม [cut] หากเจอหลาย [cut] ติดกัน จะบีบให้เหลือ [cut] เดียว
  ********************************************************/
 
 const express = require('express');
@@ -34,8 +35,7 @@ const MONGO_URI = process.env.MONGO_URI;
 // หากมีการเชื่อมต่อ Google Docs, Sheets
 const GOOGLE_CLIENT_EMAIL = "aitar-888@eminent-wares-446512-j8.iam.gserviceaccount.com";
 const GOOGLE_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDGhyeINArKZgaV\nitEcK+o89ilPYeRNTNZgJT7VNHB5hgNLLeAcFLJ7IlCIqTLMoJEnnoDQil6aKaz8\nExVL83uSXRrzk4zQvtt3tIP31+9wOCb9D4ZGWfVP1tD0qdD4WJ1qqg1j1/8879pH\nUeQGEMuCnyVbcQ3GbYQjyYb3wEz/Qv7kMVggF+MIaGGw2NQwM0XcufSFtyxvvX2S\nb8uGc1A8R+Dn/tmcgMODhbtEgcMg6yXI5Y26MPfDjVrEbk0lfCr7IGFJX4ASYeKl\n0jhm0RGb+aya2cb55auLN3VPO5MQ+cOp8gHBf5GiC/YgF1gbRgF5b7LgmENBxSfH\nb3WVQodLAgMBAAECggEACKB14M7LdekXZHyAQrZL0EitbzQknLv33Xyw2B3rvJ7M\nr4HM/nC4eBj7y+ciUc8GZQ+CWc2GzTHTa66+mwAia1qdYbPp3LuhGM4Leq5zn/o+\nA3rJuG6PS4qyUMy89msPXW5fSj/oE535QREiFKYP2dtlia2GI4xoag+x9uZwfMUO\nWKEe7tiUoZQEiGhwtjLq9lyST4kGGmlhNee9OyhDJcw4uCt8Cepr++hMDleWUF6c\nX0nbGmoSS0sZ5Boy8ATMhw/3luaOAlTUEz/nVDvbbWlNL9etwLKiAVw+AQXsPHNW\nNWF7gyEIsEi0qSM3PtA1X7IdReRXHqmfiZs0J3qSQQKBgQD1+Yj37Yuqj8hGi5PY\n+M0ieMdGcbUOmJsM1yUmBMV4bfaTiqm504P6DIYAqfDDWeozcHwcdpG1AfFAihEi\nh6lb0qRk8YaGbzvac8mWhwo/jDA5QB97fjFa6uwtlewZ0Er/U3QmOeVVnVC1y1b0\nrbJD5yjvI3ve+gpwAz0glpIMiwKBgQDOnpD7p7ylG4NQunqmzzdozrzZP0L6EZyE\n141st/Hsp9rtO9/ADuH6WhpirQ516l5LLv7mLPA8S9CF/cSdWF/7WlxBPjM8WRs9\nACFNBJIwUfjzPnvECmtsayzRlKuyCAspnNSkzgtdtvf2xI82Z3BGov9goZfu+D4A\n36b1qXsIQQKBgQCO1CojhO0vyjPKOuxL9hTvqmBUWFyBMD4AU8F/dQ/RYVDn1YG+\npMKi5Li/E+75EHH9EpkO0g7Do3AaQNG4UjwWVJcfAlxSHa8Mp2VsIdfilJ2/8KsX\nQ2yXVYh04/Rn/No/ro7oT4AKmcGu/nbstxuncEgFrH4WOOzspATPsn72BwKBgG5N\nBAT0NKbHm0B7bIKkWGYhB3vKY8zvnejk0WDaidHWge7nabkzuLtXYoKO9AtKxG/K\ndNUX5F+r8XO2V0HQLd0XDezecaejwgC8kwp0iD43ZHkmQBgVn+dPB6wSe94coSjj\nyjj4reSnipQ3tmRKsAtldIN3gI5YA3Gf85dtlHqBAoGAD5ePt7cmu3tDZhA3A8f9\no8mNPvqz/WGs7H2Qgjyfc3jUxEGhVt1Su7J1j+TppfkKtJIDKji6rVA9oIjZtpZT\ngxnU6hcYuiwbLh3wGEFIjP1XeYYILudqfWOEbwnxD1RgMkCqfSHf/niWlfiH6p3F\ndnBsLY/qXdKfS/OXyezAm4M=\n-----END PRIVATE KEY-----\n";
-
-const GOOGLE_DOC_ID = "1IDvCXWa_5QllMTKrVSvhLRQPNNGkYgxb8byaDGGEhyU"
+const GOOGLE_DOC_ID = "1IDvCXWa_5QllMTKrVSvhLRQPNNGkYgxb8byaDGGEhyU";
 const SPREADSHEET_ID = "1esN_P6JuPzYUGesR60zVuIGeuvSnRM1hlyaxCJbhI_c";
 const SHEET_RANGE = "ชีต1!A2:B28"; 
 
@@ -258,12 +258,12 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     }
 
     // ====== (A) ป้องกันวนลูป [cut] ซ้ำ ======
-    // 1) ลบกรณีมี [cut][cut][cut] ติดกันเกินไป
+    // 1) รวม [cut][cut][cut] ติดกันให้เหลือ [cut] เดียว
     assistantReply = assistantReply.replace(/\[cut\]{2,}/g, "[cut]");
-    // 2) จำกัดจำนวน [cut] ทั้งหมดในข้อความ (เช่น ไม่เกิน 10)
+    // 2) ไม่ลบ [cut] ทิ้ง -> เราจะเก็บไว้ให้ไป split ทีหลัง
+    // 3) จำกัดจำนวน [cut] ทั้งหมดในข้อความ (ถ้าเกิน 10 ก็เอาแค่ 10 segment)
     const cutList = assistantReply.split("[cut]");
     if (cutList.length > 10) {
-      // ถ้าเจอเกิน 10 segment เราอาจจะตัดทิ้ง
       assistantReply = cutList.slice(0, 10).join("[cut]");
     }
 
@@ -351,6 +351,7 @@ async function sendVideoMessage(userId, videoUrl) {
   }
 }
 
+
 /**
  * ฟังก์ชันหลักในการสั่งส่งข้อความ
  * - จะสแกน [SEND_IMAGE], [SEND_VIDEO]
@@ -358,24 +359,41 @@ async function sendVideoMessage(userId, videoUrl) {
  * - แยก segment ด้วย [cut] ทีละชุด
  */
 async function sendTextMessage(userId, response) {
-  // ====== Post-processing อีกชั้น: ป้องกัน [cut] ติดกัน หรือเยอะเกิน ======
-  response = response.replace(/\[cut\]{2,}/g, "[cut]"); // ตัด [cut] ติดกัน
-  let segments = response.split("[cut]").map(s => s.trim()).filter(Boolean);
+  // Debug: ดูข้อความดิบ
+  console.log(">>> sendTextMessage() raw response:", JSON.stringify(response));
+
+  // 1) รวม [cut][cut][cut] ติดกันให้เหลือครั้งเดียว (กันกรณี GPT พิมพ์ซ้ำ)
+  response = response.replace(/\[cut\]{2,}/g, "[cut]");
+
+  // 2) split ตาม [cut]
+  let segments = response.split("[cut]").map(s => s.trim());
+
+  // 3) เอา segment ที่ไม่ใช่ "" (filter out empty)
+  segments = segments.filter(seg => seg.length > 0);
+
+  // 4) limit ไม่เกิน 10 segment
   if (segments.length > 10) {
-    segments = segments.slice(0, 10); // limit ไว้ไม่เกิน 10 segment
+    segments = segments.slice(0, 10);
   }
 
-  // วนลูปทีละเซกเมนต์
-  for (const segment of segments) {
+  // Debug: ดู segment ที่แยกได้
+  console.log(">>> segments:", segments.length, segments);
+
+  // 5) วนลูปทีละ segment
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    console.log(`>>> [Segment ${i+1}]`, JSON.stringify(segment));
+
     // --- ตรวจจับลิงก์รูป ---
     const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
-    const images = [...segment.matchAll(imageRegex)];
-
     // --- ตรวจจับลิงก์วิดีโอ ---
     const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
+
+    // หาให้หมดใน segment
+    const images = [...segment.matchAll(imageRegex)];
     const videos = [...segment.matchAll(videoRegex)];
 
-    // ตัดคำสั่งออกจากข้อความ
+    // ตัดคำสั่งออกจากข้อความที่จะส่งเป็น text
     let textPart = segment
       .replace(imageRegex, '')
       .replace(videoRegex, '')
@@ -403,7 +421,7 @@ async function sendTextMessage(userId, response) {
 
 // ====================== 8) Webhook Routes & Startup ======================
 
-// ---- เพิ่มตัวแปร global สำหรับกัน mid ซ้ำ ----
+// ---- เพิ่มตัวแปร global สำหรับกัน mid ซ้ำ (กันลูป) ----
 const processedMessageIds = new Set();
 
 // ยืนยัน webhook กับ Facebook
@@ -525,10 +543,10 @@ app.post('/webhook', async (req, res) => {
                 }
               });
             } else {
-              // ถ้าเป็นไฟล์อื่น (audio, video, location)
+              // ถ้าเป็นไฟล์อื่น (audio, video, location ฯลฯ)
               userContentArray.push({
                 type: "text",
-                text: `ไฟล์แนบประเภท: ${att.type} (ยังไม่รองรับส่งต่อเป็นรูป)`,
+                text: `ไฟล์แนบประเภท: ${att.type} (ยังไม่รองรับส่งต่อเป็นรูป/วิดีโอ)`,
               });
             }
           }
