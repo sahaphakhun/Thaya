@@ -1,5 +1,5 @@
 /*******************************************************
- * index.js (โค้ดเต็ม – ปรับให้ส่งรูป/วิดีโอแบบ sequential)
+ * index.js (โค้ดเต็ม – ป้องกันการเรียกซ้ำ และส่งรูป/วิดีโอก่อนข้อความ)
  * - ใช้ Express + body-parser (Webhook สำหรับ Facebook)
  * - MongoDB เก็บประวัติแชท (chat_history) และสถานะผู้ใช้ (active_user_status)
  * - ดึง systemInstructions จาก Google Docs + Google Sheets
@@ -8,11 +8,12 @@
  * - ไม่ตอบผู้ใช้ระหว่างปิด AI (แต่ยังบันทึกประวัติ)
  * - ป้องกัน Echo message (is_echo) ไม่ให้ตอบตัวเองซ้ำ
  ********************************************************/
-express = require('express');
+
+const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
-const util = require('util');            // <--- เพิ่ม
-const requestPost = util.promisify(request.post); // <--- เพิ่ม
+const util = require('util');            // <--- สำหรับ promisify
+const requestPost = util.promisify(request.post); // <--- ใช้ await requestPost
 const { google } = require('googleapis');
 const { MongoClient } = require('mongodb');
 const { OpenAI } = require('openai');
@@ -251,10 +252,22 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     });
 
     // ดึงข้อความของ assistant
-    const assistantReply = response.choices[0].message.content;
-    return (typeof assistantReply === "string") 
-      ? assistantReply.trim()
-      : JSON.stringify(assistantReply);
+    let assistantReply = response.choices[0].message.content;
+    if (typeof assistantReply !== "string") {
+      assistantReply = JSON.stringify(assistantReply);
+    }
+
+    // ====== (A) ป้องกันวนลูป [cut] ซ้ำ ======
+    // 1) ลบกรณีมี [cut][cut][cut] ติดกันเกินไป
+    assistantReply = assistantReply.replace(/\[cut\]{2,}/g, "[cut]");
+    // 2) จำกัดจำนวน [cut] ทั้งหมดในข้อความ (เช่น ไม่เกิน 10)
+    const cutList = assistantReply.split("[cut]");
+    if (cutList.length > 10) {
+      // ถ้าเจอเกิน 10 segment เราอาจจะตัดทิ้ง
+      assistantReply = cutList.slice(0, 10).join("[cut]");
+    }
+
+    return assistantReply.trim();
 
   } catch (error) {
     console.error("Error getAssistantResponse:", error);
@@ -263,11 +276,9 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
 }
 
 
-// ====================== 7) ฟังก์ชันส่งข้อความกลับ Facebook (เวอร์ชัน async/await) ======================
+// ====================== 7) ฟังก์ชันส่งข้อความกลับ Facebook (async/await) ======================
 
-/**
- * ส่งข้อความตัวอักษรธรรมดา (async)
- */
+/** ส่งข้อความตัวอักษร (await) */
 async function sendSimpleTextMessage(userId, text) {
   const reqBody = {
     recipient: { id: userId },
@@ -288,9 +299,7 @@ async function sendSimpleTextMessage(userId, text) {
   }
 }
 
-/**
- * ส่งรูปภาพ (async)
- */
+/** ส่งรูปภาพ (await) */
 async function sendImageMessage(userId, imageUrl) {
   const reqBody = {
     recipient: { id: userId },
@@ -316,9 +325,7 @@ async function sendImageMessage(userId, imageUrl) {
   }
 }
 
-/**
- * ส่งวิดีโอ (async)
- */
+/** ส่งวิดีโอ (await) */
 async function sendVideoMessage(userId, videoUrl) {
   const reqBody = {
     recipient: { id: userId },
@@ -345,47 +352,54 @@ async function sendVideoMessage(userId, videoUrl) {
 }
 
 /**
- * ฟังก์ชันหลักในการสั่งส่งข้อความ (ตรวจจับ [cut], [SEND_IMAGE], [SEND_VIDEO]) แบบรอเรียงลำดับ
+ * ฟังก์ชันหลักในการสั่งส่งข้อความ
+ * - จะสแกน [SEND_IMAGE], [SEND_VIDEO]
+ * - ส่งรูป/วิดีโอก่อน แล้วค่อยส่งข้อความ
+ * - แยก segment ด้วย [cut] ทีละชุด
  */
 async function sendTextMessage(userId, response) {
-  // 1) สปลิตข้อความตาม "[cut]"
-  const segments = response.split("[cut]").map(s => s.trim()).filter(Boolean);
+  // ====== Post-processing อีกชั้น: ป้องกัน [cut] ติดกัน หรือเยอะเกิน ======
+  response = response.replace(/\[cut\]{2,}/g, "[cut]"); // ตัด [cut] ติดกัน
+  let segments = response.split("[cut]").map(s => s.trim()).filter(Boolean);
+  if (segments.length > 10) {
+    segments = segments.slice(0, 10); // limit ไว้ไม่เกิน 10 segment
+  }
 
-  // 2) วนลูปตามเซกเมนต์
+  // วนลูปทีละเซกเมนต์
   for (const segment of segments) {
-
-    // ตรวจจับลิงก์รูป
+    // --- ตรวจจับลิงก์รูป ---
     const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
     const images = [...segment.matchAll(imageRegex)];
 
-    // ตรวจจับลิงก์วิดีโอ
+    // --- ตรวจจับลิงก์วิดีโอ ---
     const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
     const videos = [...segment.matchAll(videoRegex)];
 
-    // ตัดคำสั่งรูป/วิดีโอ ออก
+    // ตัดคำสั่งออกจากข้อความ
     let textPart = segment
       .replace(imageRegex, '')
       .replace(videoRegex, '')
       .trim();
 
-    // 2.1) ส่งข้อความตัวอักษร (ถ้ามี)
-    if (textPart) {
-      await sendSimpleTextMessage(userId, textPart);
-    }
-
-    // 2.2) ส่งรูปทีละรูป
+    // 1) ส่งรูปก่อน
     for (const match of images) {
       const imageUrl = match[1];
       await sendImageMessage(userId, imageUrl);
     }
 
-    // 2.3) ส่งวิดีโอทีละอัน
+    // 2) ส่งวิดีโอก่อน
     for (const match of videos) {
       const videoUrl = match[1];
       await sendVideoMessage(userId, videoUrl);
     }
 
-    // (ถ้าต้องการเว้นจังหวะเล็กน้อยระหว่างเซกเมนต์ ก็ใส่ setTimeout หรือ await sleep(...) ที่นี่)
+    // 3) ส่งข้อความ (ถ้ามี)
+    if (textPart) {
+      await sendSimpleTextMessage(userId, textPart);
+    }
+
+    // หากต้องการหน่วงระหว่าง segment:
+    // await new Promise(resolve => setTimeout(resolve, 1000));
   }
 }
 
@@ -493,7 +507,10 @@ app.post('/webhook', async (req, res) => {
         const systemInstructions = buildSystemInstructions();
         const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
 
+        // บันทึกใน DB
         await saveChatHistory(userId, userMsg, assistantMsg);
+
+        // เรียกส่งข้อความกลับผู้ใช้ (เรียกครั้งเดียว)
         await sendTextMessage(userId, assistantMsg);
 
       // -----------------------------
@@ -539,7 +556,10 @@ app.post('/webhook', async (req, res) => {
         const systemInstructions = buildSystemInstructions();
         const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
 
+        // บันทึกใน DB
         await saveChatHistory(userId, userContentArray, assistantMsg);
+
+        // เรียกส่งข้อความ (ครั้งเดียว)
         await sendTextMessage(userId, assistantMsg);
 
       } else {
