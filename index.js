@@ -1,15 +1,7 @@
 /*******************************************************
  * index.js (โค้ดเต็ม – ป้องกันการเรียกซ้ำ และส่งรูป/วิดีโอก่อนข้อความ)
  * - ใช้ Express + body-parser (Webhook สำหรับ Facebook)
- * - MongoDB เก็บประวัติแชท (chat_history) และสถานะผู้ใช้ (active_user_status)
- * - ดึง systemInstructions จาก Google Docs + Google Sheets
- * - ใช้ OpenAI GPT ตอบ (model: "gpt-4o-mini" สามารถวิเคราะห์รูปได้)
- * - มีฟังก์ชันปิดระบบเอไอ ([ปิดระบบเอไอ]/[เปิดระบบเอไอ])
- * - ไม่ตอบผู้ใช้ระหว่างปิด AI (แต่ยังบันทึกประวัติ)
- * - ป้องกัน Echo message (is_echo) ไม่ให้ตอบตัวเองซ้ำ
- ********************************************************/
-
-const express = require('express');
+ * - 
 const bodyParser = require('body-parser');
 const request = require('request');
 const util = require('util');            // <--- สำหรับ promisify
