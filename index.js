@@ -26,7 +26,7 @@ app.use(bodyParser.json());
 // ====================== 1) ENV Config ======================
 const PORT = process.env.PORT || 3000;
 
-// ใส่ค่าสำคัญใน Environment Variables หรือแก้ตรงนี้เป็นค่าสายตรง
+// ควรเก็บไว้ใน Environment หรือไฟล์ config แยก
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN; 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "XianTA1234";
@@ -52,12 +52,21 @@ async function connectDB() {
   return mongoClient;
 }
 
+/**
+ * normalizeRoleContent: บังคับ content ให้เป็น string หรือ array
+ * ป้องกัน error เวลาส่งไป GPT
+ */
 function normalizeRoleContent(role, content) {
-  // ฟังก์ชันสำหรับบังคับให้ content เป็น string เสมอ
-  if (typeof content !== "string") {
-    return { role, content: JSON.stringify(content) };
+  // ถ้าเป็น string อยู่แล้ว => ใช้ได้
+  if (typeof content === "string") {
+    return { role, content };
   }
-  return { role, content };
+  // ถ้าเป็นอาเรย์ => ใช้ได้ (เช่น กรณีรูป)
+  if (Array.isArray(content)) {
+    return { role, content };
+  }
+  // กรณีอื่น => แปลงเป็น string ไว้ก่อน
+  return { role, content: JSON.stringify(content) };
 }
 
 async function getChatHistory(userId) {
@@ -67,8 +76,14 @@ async function getChatHistory(userId) {
   const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
   
   return chats.map(ch => {
-    // บังคับให้ content เป็น string เสมอ
-    return normalizeRoleContent(ch.role, ch.content);
+    // ลอง parse เพื่อดูว่าเป็น array หรือเปล่า
+    try {
+      const parsed = JSON.parse(ch.content);
+      return normalizeRoleContent(ch.role, parsed);
+    } catch (err) {
+      // ถ้า parse ไม่ได้ แสดงว่าเป็น string ปกติ
+      return normalizeRoleContent(ch.role, ch.content);
+    }
   });
 }
 
@@ -79,8 +94,13 @@ async function saveChatHistory(userId, userMsg, assistantMsg) {
   const db = client.db("chatbot");
   const coll = db.collection("chat_history");
 
-  // ถ้า userMsg เป็น object/array => แปลงเป็น string
-  let userMsgToSave = typeof userMsg === "object" ? JSON.stringify(userMsg) : userMsg;
+  // userMsg อาจเป็น string หรือ array => แปลงเป็น string หากไม่ใช่
+  let userMsgToSave;
+  if (typeof userMsg === "string") {
+    userMsgToSave = userMsg;
+  } else {
+    userMsgToSave = JSON.stringify(userMsg);
+  }
 
   await coll.insertOne({
     senderId: userId,
@@ -235,20 +255,12 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     const messages = [
       { role: "system", content: systemInstructions },
       // ประวัติ (map ให้เป็นรูปแบบ { role, content })
-      // หาก content ใน DB เป็น string ให้ใช้ตรง ๆ / ถ้าเป็น JSON string อาจต้อง parse ก่อน
-      ...history.map(h => {
-        try {
-          const parsed = JSON.parse(h.content);
-          // บังคับเป็น string เสมอ
-          return normalizeRoleContent(h.role, parsed);
-        } catch(e) {
-          return normalizeRoleContent(h.role, h.content);
-        }
-      })
+      ...history
     ];
 
-    // push user message (บังคับเป็น string)
-    messages.push(normalizeRoleContent("user", userContent));
+    // ใส่ userContent (string / array) => normalize
+    let finalUserMessage = normalizeRoleContent("user", userContent);
+    messages.push(finalUserMessage);
 
     // เรียกโมเดล
     const response = await openai.chat.completions.create({
@@ -367,13 +379,13 @@ async function sendTextMessage(userId, response) {
   // Debug: ดูข้อความดิบ
   console.log(">>> sendTextMessage() raw response:", JSON.stringify(response));
 
-  // 1) รวม [cut][cut][cut] ติดกันให้เหลือครั้งเดียว (กันกรณี GPT พิมพ์ซ้ำ)
+  // 1) รวม [cut][cut][cut] ติดกันให้เหลือครั้งเดียว
   response = response.replace(/\[cut\]{2,}/g, "[cut]");
 
   // 2) split ตาม [cut]
   let segments = response.split("[cut]").map(s => s.trim());
 
-  // 3) เอา segment ที่ไม่ใช่ "" (filter out empty)
+  // 3) filter empty
   segments = segments.filter(seg => seg.length > 0);
 
   // 4) limit ไม่เกิน 10 segment
@@ -381,7 +393,6 @@ async function sendTextMessage(userId, response) {
     segments = segments.slice(0, 10);
   }
 
-  // Debug: ดู segment ที่แยกได้
   console.log(">>> segments:", segments.length, segments);
 
   // 5) วนลูปทีละ segment
@@ -398,25 +409,25 @@ async function sendTextMessage(userId, response) {
     const images = [...segment.matchAll(imageRegex)];
     const videos = [...segment.matchAll(videoRegex)];
 
-    // ตัดคำสั่งออกจากข้อความที่จะส่งเป็น text
+    // ตัดคำสั่งออกจากข้อความ
     let textPart = segment
       .replace(imageRegex, '')
       .replace(videoRegex, '')
       .trim();
 
-    // 1) ส่งรูปก่อน
+    // (1) ส่งรูปก่อน
     for (const match of images) {
       const imageUrl = match[1];
       await sendImageMessage(userId, imageUrl);
     }
 
-    // 2) ส่งวิดีโอก่อน
+    // (2) ส่งวิดีโอก่อน
     for (const match of videos) {
       const videoUrl = match[1];
       await sendVideoMessage(userId, videoUrl);
     }
 
-    // 3) ส่งข้อความ (ถ้ามี)
+    // (3) ส่งข้อความ (ถ้ามี)
     if (textPart) {
       await sendSimpleTextMessage(userId, textPart);
     }
@@ -444,19 +455,14 @@ app.get('/webhook', (req, res) => {
 
 // รับ event จาก Messenger
 app.post('/webhook', async (req, res) => {
-  // 1) ตรวจสอบ object
   if (req.body.object === 'page') {
-    // 2) วนซ้ำ entry ต่าง ๆ
     for (const entry of req.body.entry) {
-      // ตรวจสอบว่ามี messaging
       if (!entry.messaging || entry.messaging.length === 0) {
         continue;
       }
 
       for (const webhookEvent of entry.messaging) {
-        // ----------------------------------------------------------------
         // A) ตรวจจับ event ที่ไม่ใช่ข้อความ user หรือเป็น echo/delivery/read/app_id
-        // ----------------------------------------------------------------
         if (
           webhookEvent.message?.is_echo ||
           webhookEvent.delivery ||
@@ -467,7 +473,7 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
 
-        // B) ถ้ามี message.mid ให้เช็กว่าเคยประมวลผลไปแล้วหรือยัง
+        // B) ป้องกัน message.mid ซ้ำ
         if (webhookEvent.message && webhookEvent.message.mid) {
           const mid = webhookEvent.message.mid;
           if (processedMessageIds.has(mid)) {
@@ -478,24 +484,22 @@ app.post('/webhook', async (req, res) => {
           }
         }
 
-        // C) หา userId สำหรับกรณีทั่วไป
+        // C) หา userId
         const pageId = entry.id; 
         let userId = (webhookEvent.sender.id === pageId)
           ? webhookEvent.recipient.id
           : webhookEvent.sender.id;
 
-        // ดึงสถานะ aiEnabled
+        // D) เช็คสถานะ aiEnabled
         const userStatus = await getUserStatus(userId);
         const aiEnabled = userStatus.aiEnabled;
 
-        // D) เช็กว่าเป็นข้อความ text หรือไฟล์แนบ
+        // E) ประมวลผลกรณีเป็น text หรือ attachment
         if (webhookEvent.message && webhookEvent.message.text) {
-          // -----------------------------
-          // หากเป็น Text message
-          // -----------------------------
+          // เคสข้อความ (Text)
           const userMsg = webhookEvent.message.text;
 
-          // เช็กคำสั่ง ปิด/เปิด ai
+          // เช็กคำสั่งปิด/เปิด AI (หากต้องการ)
           if (userMsg === "สวัสดีค่า แอดมิน Venus นะคะ จะมาดำเนินเรื่องต่อ") {
             await setUserStatus(userId, false);
             await sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
@@ -508,38 +512,33 @@ app.post('/webhook', async (req, res) => {
             continue;
           }
 
-          // ถ้า ai ถูกปิด
+          // ถ้า AI ปิด ไม่ตอบ
           if (!aiEnabled) {
             await saveChatHistory(userId, userMsg, "");
             continue;
           }
 
-          // aiEnabled = true => เรียก GPT
+          // AI เปิด => เรียก GPT
           const history = await getChatHistory(userId);
           const systemInstructions = buildSystemInstructions();
           const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
 
-          // บันทึกใน DB
+          // บันทึกและส่ง
           await saveChatHistory(userId, userMsg, assistantMsg);
-
-          // เรียกส่งข้อความกลับผู้ใช้
           await sendTextMessage(userId, assistantMsg);
 
         } else if (webhookEvent.message && webhookEvent.message.attachments) {
-          // -----------------------------
-          // หากเป็นไฟล์แนบ (image, video, ฯลฯ)
-          // -----------------------------
+          // เคสไฟล์แนบ (image, video, ฯลฯ)
           const attachments = webhookEvent.message.attachments;
 
           // สร้าง content array สำหรับผู้ใช้
           let userContentArray = [{
             type: "text",
-            text: "ผู้ใช้ส่งไฟล์แนบ",
+            text: "ผู้ใช้ส่งไฟล์แนบ"
           }];
 
           for (const att of attachments) {
             if (att.type === 'image') {
-              // ดึง URL ของรูปจาก att.payload.url
               userContentArray.push({
                 type: "image_url",
                 image_url: {
@@ -548,7 +547,8 @@ app.post('/webhook', async (req, res) => {
                 }
               });
             } else {
-              // ถ้าเป็นไฟล์อื่น (audio, video, location ฯลฯ)
+              // เป็นไฟล์อื่น ๆ (audio, video, location, etc.)
+              // ตัวอย่าง: ถ้ายังไม่รองรับ ก็ใส่เป็น text ธรรมดา
               userContentArray.push({
                 type: "text",
                 text: `ไฟล์แนบประเภท: ${att.type} (ยังไม่รองรับส่งต่อเป็นรูป/วิดีโอ)`,
@@ -556,21 +556,18 @@ app.post('/webhook', async (req, res) => {
             }
           }
 
+          // ถ้า AI ปิด ไม่ตอบ
           if (!aiEnabled) {
-            // บันทึกอย่างเดียว
             await saveChatHistory(userId, userContentArray, "");
             continue;
           }
 
-          // aiEnabled = true => เรียก GPT
+          // AI เปิด => เรียก GPT
           const history = await getChatHistory(userId);
           const systemInstructions = buildSystemInstructions();
           const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
 
-          // บันทึกใน DB
           await saveChatHistory(userId, userContentArray, assistantMsg);
-
-          // เรียกส่งข้อความ
           await sendTextMessage(userId, assistantMsg);
 
         } else {
@@ -578,14 +575,14 @@ app.post('/webhook', async (req, res) => {
         }
       }
     }
-    // ตอบกลับ Facebook ว่าได้รับ event แล้ว
+
+    // ตอบกลับ Facebook ว่าได้รับ event
     res.status(200).send("EVENT_RECEIVED");
 
   } else {
     res.sendStatus(404);
   }
 });
-
 
 
 // ====================== Start Server ======================
