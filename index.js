@@ -52,17 +52,26 @@ async function connectDB() {
   return mongoClient;
 }
 
-/** ดึงประวัติแชทของ userId นั้น (PSID) */
+function normalizeRoleContent(role, content) {
+  // ถ้า content ไม่ใช่ string => แปลงเป็น string
+  if (typeof content !== "string") {
+    return { role, content: JSON.stringify(content) };
+  }
+  return { role, content };
+}
+
 async function getChatHistory(userId) {
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("chat_history");
   const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
-  return chats.map(ch => ({
-    role: ch.role,
-    content: ch.content,
-  }));
+  
+  return chats.map(ch => {
+    // บังคับให้ content กลายเป็น string
+    return normalizeRoleContent(ch.role, ch.content);
+  });
 }
+
 
 /** บันทึกข้อความ user และข้อความตอบ (assistant) ลง DB */
 async function saveChatHistory(userId, userMsg, assistantMsg) {
