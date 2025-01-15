@@ -53,7 +53,7 @@ async function connectDB() {
 }
 
 function normalizeRoleContent(role, content) {
-  // ถ้า content ไม่ใช่ string => แปลงเป็น string
+  // ฟังก์ชันสำหรับบังคับให้ content เป็น string เสมอ
   if (typeof content !== "string") {
     return { role, content: JSON.stringify(content) };
   }
@@ -67,7 +67,7 @@ async function getChatHistory(userId) {
   const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
   
   return chats.map(ch => {
-    // บังคับให้ content กลายเป็น string
+    // บังคับให้ content เป็น string เสมอ
     return normalizeRoleContent(ch.role, ch.content);
   });
 }
@@ -239,19 +239,16 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
       ...history.map(h => {
         try {
           const parsed = JSON.parse(h.content);
-          return { role: h.role, content: parsed };
+          // บังคับเป็น string เสมอ
+          return normalizeRoleContent(h.role, parsed);
         } catch(e) {
-          return { role: h.role, content: h.content };
+          return normalizeRoleContent(h.role, h.content);
         }
       })
     ];
 
-    // push user message
-    if (typeof userContent === "string") {
-      messages.push({ role: "user", content: userContent });
-    } else {
-      messages.push({ role: "user", content: userContent });
-    }
+    // push user message (บังคับเป็น string)
+    messages.push(normalizeRoleContent("user", userContent));
 
     // เรียกโมเดล
     const response = await openai.chat.completions.create({
@@ -269,8 +266,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     // ====== (A) ป้องกันวนลูป [cut] ซ้ำ ======
     // 1) รวม [cut][cut][cut] ติดกันให้เหลือ [cut] เดียว
     assistantReply = assistantReply.replace(/\[cut\]{2,}/g, "[cut]");
-    // 2) ไม่ลบ [cut] ทิ้ง -> เราจะเก็บไว้ให้ไป split ทีหลัง
-    // 3) จำกัดจำนวน [cut] ทั้งหมดในข้อความ (ถ้าเกิน 10 ก็เอาแค่ 10 segment)
+    // 2) จำกัดจำนวน [cut] ทั้งหมดในข้อความ (ถ้าเกิน 10 ก็เอาแค่ 10 segment)
     const cutList = assistantReply.split("[cut]");
     if (cutList.length > 10) {
       assistantReply = cutList.slice(0, 10).join("[cut]");
