@@ -7,6 +7,7 @@
  * - มีฟังก์ชันปิดระบบเอไอ ([ปิดระบบเอไอ]/[เปิดระบบเอไอ])
  * - ไม่ตอบผู้ใช้ระหว่างปิด AI (แต่ยังบันทึกประวัติ)
  * - ป้องกัน Echo message (is_echo) ไม่ให้ตอบตัวเองซ้ำ
+ * - ป้องกันการวนลูปซ้ำด้วยการเช็ก event (echo/delivery/read/app_id) และ message.mid
  ********************************************************/
 
 const express = require('express');
@@ -37,7 +38,6 @@ const GOOGLE_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0
 const GOOGLE_DOC_ID = "1IDvCXWa_5QllMTKrVSvhLRQPNNGkYgxb8byaDGGEhyU"
 const SPREADSHEET_ID = "1esN_P6JuPzYUGesR60zVuIGeuvSnRM1hlyaxCJbhI_c";
 const SHEET_RANGE = "ชีต1!A2:B28"; 
-
 
 // ====================== 2) MongoDB ======================
 let mongoClient = null;
@@ -397,14 +397,14 @@ async function sendTextMessage(userId, response) {
     if (textPart) {
       await sendSimpleTextMessage(userId, textPart);
     }
-
-    // หากต้องการหน่วงระหว่าง segment:
-    // await new Promise(resolve => setTimeout(resolve, 1000));
   }
 }
 
 
 // ====================== 8) Webhook Routes & Startup ======================
+
+// ---- เพิ่มตัวแปร global สำหรับกัน mid ซ้ำ ----
+const processedMessageIds = new Set();
 
 // ยืนยัน webhook กับ Facebook
 app.get('/webhook', (req, res) => {
@@ -423,147 +423,136 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   // 1) ตรวจสอบ object
   if (req.body.object === 'page') {
-    // 2) วนซ้ำ entry ต่าง ๆ 
+    // 2) วนซ้ำ entry ต่าง ๆ
     for (const entry of req.body.entry) {
       // ตรวจสอบว่ามี messaging
       if (!entry.messaging || entry.messaging.length === 0) {
         continue;
       }
 
-      // เอา event ตัวแรกออกมา
-      const webhookEvent = entry.messaging[0];
-      if (!webhookEvent) continue;
-
-      // -----------------------------
-      // A) ถ้าเป็น echo จากเพจเอง?
-      // -----------------------------
-      if (webhookEvent.message && webhookEvent.message.is_echo) {
-        const userMsg = webhookEvent.message.text || "";
-        
-        // ตรวจสอบคำสั่ง ปิด/เปิด ai
-        if (userMsg === "สวัสดีค่า แอดมิน Venus นะคะ จะมาดำเนินเรื่องต่อ") {
-          const pageId = entry.id; 
-          let userId = (webhookEvent.sender.id === pageId) 
-            ? webhookEvent.recipient.id 
-            : webhookEvent.sender.id;
-          await setUserStatus(userId, false);
-          await sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
-          await saveChatHistory(userId, userMsg, "แอดมิน Venus สวัสดีค่ะ");
-          continue;
-        } else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
-          const pageId = entry.id; 
-          let userId = (webhookEvent.sender.id === pageId) 
-            ? webhookEvent.recipient.id 
-            : webhookEvent.sender.id;
-          await setUserStatus(userId, true);
-          await sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
-          await saveChatHistory(userId, userMsg, "แอดมิน Venus ขอตัวก่อนนะคะ");
+      for (const webhookEvent of entry.messaging) {
+        // ----------------------------------------------------------------
+        // A) ตรวจจับ event ที่ไม่ใช่ข้อความ user หรือเป็น echo/delivery/read/app_id
+        // ----------------------------------------------------------------
+        if (
+          webhookEvent.message?.is_echo ||
+          webhookEvent.delivery ||
+          webhookEvent.read ||
+          webhookEvent.message?.app_id
+        ) {
+          console.log("Skipping echo/delivery/read/app_id event");
           continue;
         }
 
-        console.log(">> [Webhook] Skip echo message from page (not an AI command).");
-        continue;
-      }
-
-      // -----------------------------
-      // B) หา userId สำหรับกรณีทั่วไป
-      // -----------------------------
-      const pageId = entry.id; 
-      let userId = (webhookEvent.sender.id === pageId)
-        ? webhookEvent.recipient.id
-        : webhookEvent.sender.id;
-
-      // ดึงสถานะ aiEnabled
-      const userStatus = await getUserStatus(userId);
-      const aiEnabled = userStatus.aiEnabled;
-
-      // -----------------------------
-      // C) ถ้าเป็นข้อความ text
-      // -----------------------------
-      if (webhookEvent.message && webhookEvent.message.text) {
-        const userMsg = webhookEvent.message.text;
-
-        // เช็กคำสั่ง ปิด/เปิด ai
-        if (userMsg === "สวัสดีค่า แอดมิน Venus นะคะ จะมาดำเนินเรื่องต่อ") {
-          await setUserStatus(userId, false);
-          await sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
-          await saveChatHistory(userId, userMsg, "แอดมิน Venus สวัสดีค่ะ");
-          continue;
-        } else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
-          await setUserStatus(userId, true);
-          await sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
-          await saveChatHistory(userId, userMsg, "แอดมิน Venus ขอตัวก่อนนะคะ");
-          continue;
-        }
-
-        // ถ้า ai ถูกปิด
-        if (!aiEnabled) {
-          await saveChatHistory(userId, userMsg, "");
-          continue;
-        }
-
-        // aiEnabled = true => เรียก GPT
-        const history = await getChatHistory(userId);
-        const systemInstructions = buildSystemInstructions();
-        const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
-
-        // บันทึกใน DB
-        await saveChatHistory(userId, userMsg, assistantMsg);
-
-        // เรียกส่งข้อความกลับผู้ใช้ (เรียกครั้งเดียว)
-        await sendTextMessage(userId, assistantMsg);
-
-      // -----------------------------
-      // D) ถ้าเป็นไฟล์แนบ (image, ฯลฯ)
-      // -----------------------------
-      } else if (webhookEvent.message && webhookEvent.message.attachments) {
-        const attachments = webhookEvent.message.attachments;
-
-        // สร้าง content array สำหรับผู้ใช้
-        let userContentArray = [{
-          type: "text",
-          text: "ผู้ใช้ส่งไฟล์แนบ",
-        }];
-
-        // วนลูป attachments
-        for (const att of attachments) {
-          if (att.type === 'image') {
-            // ดึง URL ของรูปจาก att.payload.url
-            userContentArray.push({
-              type: "image_url",
-              image_url: {
-                url: att.payload.url,
-                detail: "auto"
-              }
-            });
+        // B) ถ้ามี message.mid ให้เช็กว่าเคยประมวลผลไปแล้วหรือยัง
+        if (webhookEvent.message && webhookEvent.message.mid) {
+          const mid = webhookEvent.message.mid;
+          if (processedMessageIds.has(mid)) {
+            console.log("Skipping repeated mid:", mid);
+            continue;
           } else {
-            // ถ้าเป็นไฟล์อื่น (audio, video, location)
-            userContentArray.push({
-              type: "text",
-              text: `ไฟล์แนบประเภท: ${att.type} (ยังไม่รองรับส่งต่อเป็นรูป)`
-            });
+            processedMessageIds.add(mid);
           }
         }
 
-        if (!aiEnabled) {
-          // บันทึกอย่างเดียว
-          await saveChatHistory(userId, userContentArray, "");
-          continue;
+        // C) หา userId สำหรับกรณีทั่วไป
+        const pageId = entry.id; 
+        let userId = (webhookEvent.sender.id === pageId)
+          ? webhookEvent.recipient.id
+          : webhookEvent.sender.id;
+
+        // ดึงสถานะ aiEnabled
+        const userStatus = await getUserStatus(userId);
+        const aiEnabled = userStatus.aiEnabled;
+
+        // D) เช็กว่าเป็นข้อความ text หรือไฟล์แนบ
+        if (webhookEvent.message && webhookEvent.message.text) {
+          // -----------------------------
+          // หากเป็น Text message
+          // -----------------------------
+          const userMsg = webhookEvent.message.text;
+
+          // เช็กคำสั่ง ปิด/เปิด ai
+          if (userMsg === "สวัสดีค่า แอดมิน Venus นะคะ จะมาดำเนินเรื่องต่อ") {
+            await setUserStatus(userId, false);
+            await sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
+            await saveChatHistory(userId, userMsg, "แอดมิน Venus สวัสดีค่ะ");
+            continue;
+          } else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
+            await setUserStatus(userId, true);
+            await sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
+            await saveChatHistory(userId, userMsg, "แอดมิน Venus ขอตัวก่อนนะคะ");
+            continue;
+          }
+
+          // ถ้า ai ถูกปิด
+          if (!aiEnabled) {
+            await saveChatHistory(userId, userMsg, "");
+            continue;
+          }
+
+          // aiEnabled = true => เรียก GPT
+          const history = await getChatHistory(userId);
+          const systemInstructions = buildSystemInstructions();
+          const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
+
+          // บันทึกใน DB
+          await saveChatHistory(userId, userMsg, assistantMsg);
+
+          // เรียกส่งข้อความกลับผู้ใช้
+          await sendTextMessage(userId, assistantMsg);
+
+        } else if (webhookEvent.message && webhookEvent.message.attachments) {
+          // -----------------------------
+          // หากเป็นไฟล์แนบ (image, video, ฯลฯ)
+          // -----------------------------
+          const attachments = webhookEvent.message.attachments;
+
+          // สร้าง content array สำหรับผู้ใช้
+          let userContentArray = [{
+            type: "text",
+            text: "ผู้ใช้ส่งไฟล์แนบ",
+          }];
+
+          for (const att of attachments) {
+            if (att.type === 'image') {
+              // ดึง URL ของรูปจาก att.payload.url
+              userContentArray.push({
+                type: "image_url",
+                image_url: {
+                  url: att.payload.url,
+                  detail: "auto"
+                }
+              });
+            } else {
+              // ถ้าเป็นไฟล์อื่น (audio, video, location)
+              userContentArray.push({
+                type: "text",
+                text: `ไฟล์แนบประเภท: ${att.type} (ยังไม่รองรับส่งต่อเป็นรูป)`,
+              });
+            }
+          }
+
+          if (!aiEnabled) {
+            // บันทึกอย่างเดียว
+            await saveChatHistory(userId, userContentArray, "");
+            continue;
+          }
+
+          // aiEnabled = true => เรียก GPT
+          const history = await getChatHistory(userId);
+          const systemInstructions = buildSystemInstructions();
+          const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
+
+          // บันทึกใน DB
+          await saveChatHistory(userId, userContentArray, assistantMsg);
+
+          // เรียกส่งข้อความ
+          await sendTextMessage(userId, assistantMsg);
+
+        } else {
+          console.log(">> [Webhook] Received event but not text/attachment:", webhookEvent);
         }
-
-        // aiEnabled = true => เรียก GPT
-        const history = await getChatHistory(userId);
-        const systemInstructions = buildSystemInstructions();
-        const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
-
-        // บันทึกใน DB
-        await saveChatHistory(userId, userContentArray, assistantMsg);
-
-        // เรียกส่งข้อความ (ครั้งเดียว)
-        await sendTextMessage(userId, assistantMsg);
-
-      } else {
-        console.log(">> [Webhook] Received event but not text/attachment:", webhookEvent);
       }
     }
     // ตอบกลับ Facebook ว่าได้รับ event แล้ว
