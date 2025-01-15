@@ -1,5 +1,5 @@
 /*******************************************************
- * index.js (โค้ดเต็ม – มีการปรับให้สามารถส่งรูปไป gpt-4o-mini)
+ * index.js (โค้ดเต็ม – ปรับให้ส่งรูป/วิดีโอแบบ sequential)
  * - ใช้ Express + body-parser (Webhook สำหรับ Facebook)
  * - MongoDB เก็บประวัติแชท (chat_history) และสถานะผู้ใช้ (active_user_status)
  * - ดึง systemInstructions จาก Google Docs + Google Sheets
@@ -12,6 +12,8 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
+const util = require('util');            // <--- เพิ่ม
+const requestPost = util.promisify(request.post); // <--- เพิ่ม
 const { google } = require('googleapis');
 const { MongoClient } = require('mongodb');
 const { OpenAI } = require('openai');
@@ -226,7 +228,6 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
       // ประวัติ (map ให้เป็นรูปแบบ { role, content })
       // หาก content ใน DB เป็น string ให้ใช้ตรง ๆ / ถ้าเป็น JSON string อาจต้อง parse ก่อน
       ...history.map(h => {
-        // ลอง parse ดูเผื่อเป็น JSON (รูป) หาก parse ไม่ได้ก็เป็น text ธรรมดา
         try {
           const parsed = JSON.parse(h.content);
           return { role: h.role, content: parsed };
@@ -237,7 +238,6 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     ];
 
     // push user message
-    // userContent อาจเป็น string หรือ array
     if (typeof userContent === "string") {
       messages.push({ role: "user", content: userContent });
     } else {
@@ -253,7 +253,6 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
 
     // ดึงข้อความของ assistant
     const assistantReply = response.choices[0].message.content;
-    // ถ้าเป็น string ก็จะ .trim() ได้
     return (typeof assistantReply === "string") 
       ? assistantReply.trim()
       : JSON.stringify(assistantReply);
@@ -265,66 +264,35 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
 }
 
 
-// ====================== 7) ฟังก์ชันส่งข้อความกลับ Facebook ======================
-function sendTextMessage(userId, response) {
-  // 1) สปลิตข้อความตามคำว่า [cut]
-  const segments = response.split("[cut]");
+// ====================== 7) ฟังก์ชันส่งข้อความกลับ Facebook (เวอร์ชัน async/await) ======================
 
-  // 2) วนลูปส่งทีละ segment
-  for (let seg of segments) {
-    const segment = seg.trim(); 
-    if (!segment) continue; // ถ้า segment ว่างเปล่า ให้ข้าม
-
-    // ตรวจจับ [SEND_IMAGE:URL]
-    const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
-    const images = [...segment.matchAll(imageRegex)];
-
-    // ตรวจจับ [SEND_VIDEO:URL]
-    const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
-    const videos = [...segment.matchAll(videoRegex)];
-
-    // ตัด [SEND_IMAGE:URL] และ [SEND_VIDEO:URL] ออกจาก text
-    let textPart = segment
-      .replace(imageRegex, '')
-      .replace(videoRegex, '')
-      .trim();
-
-    // ส่งข้อความตัวอักษร (หากมี)
-    if (textPart.length > 0) {
-      sendSimpleTextMessage(userId, textPart);
-    }
-
-    // ส่งรูป (ถ้ามี)
-    for (const match of images) {
-      const imageUrl = match[1]; // ตัวที่ 1 คือ URL
-      sendImageMessage(userId, imageUrl);
-    }
-
-    // ส่งวิดีโอ (ถ้ามี)
-    for (const match of videos) {
-      const videoUrl = match[1]; // ตัวที่ 1 คือ URL
-      sendVideoMessage(userId, videoUrl);
-    }
-  }
-}
-
-function sendSimpleTextMessage(userId, text) {
+/**
+ * ส่งข้อความตัวอักษรธรรมดา (async)
+ */
+async function sendSimpleTextMessage(userId, text) {
   const reqBody = {
     recipient: { id: userId },
     message: { text }
   };
-  request({
+  const options = {
     uri: 'https://graph.facebook.com/v12.0/me/messages',
     qs: { access_token: PAGE_ACCESS_TOKEN },
     method: 'POST',
     json: reqBody
-  }, (err) => {
-    if (!err) console.log("ส่งข้อความสำเร็จ!");
-    else console.error("ไม่สามารถส่งข้อความ:", err);
-  });
+  };
+
+  try {
+    await requestPost(options);
+    console.log("ส่งข้อความสำเร็จ!", text);
+  } catch (err) {
+    console.error("ไม่สามารถส่งข้อความ:", err);
+  }
 }
 
-function sendImageMessage(userId, imageUrl) {
+/**
+ * ส่งรูปภาพ (async)
+ */
+async function sendImageMessage(userId, imageUrl) {
   const reqBody = {
     recipient: { id: userId },
     message: {
@@ -334,15 +302,92 @@ function sendImageMessage(userId, imageUrl) {
       }
     }
   };
-  request({
+  const options = {
     uri: 'https://graph.facebook.com/v12.0/me/messages',
     qs: { access_token: PAGE_ACCESS_TOKEN },
     method: 'POST',
     json: reqBody
-  }, (err) => {
-    if (!err) console.log("ส่งรูปภาพสำเร็จ!");
-    else console.error("ไม่สามารถส่งรูปภาพ:", err);
-  });
+  };
+
+  try {
+    await requestPost(options);
+    console.log("ส่งรูปภาพสำเร็จ!", imageUrl);
+  } catch (err) {
+    console.error("ไม่สามารถส่งรูปภาพ:", err);
+  }
+}
+
+/**
+ * ส่งวิดีโอ (async)
+ */
+async function sendVideoMessage(userId, videoUrl) {
+  const reqBody = {
+    recipient: { id: userId },
+    message: {
+      attachment: {
+        type: 'video',
+        payload: { url: videoUrl, is_reusable: true }
+      }
+    }
+  };
+  const options = {
+    uri: 'https://graph.facebook.com/v12.0/me/messages',
+    qs: { access_token: PAGE_ACCESS_TOKEN },
+    method: 'POST',
+    json: reqBody
+  };
+
+  try {
+    await requestPost(options);
+    console.log("ส่งวิดีโอสำเร็จ!", videoUrl);
+  } catch (err) {
+    console.error("ไม่สามารถส่งวิดีโอ:", err);
+  }
+}
+
+/**
+ * ฟังก์ชันหลักในการสั่งส่งข้อความ (ตรวจจับ [cut], [SEND_IMAGE], [SEND_VIDEO]) แบบรอเรียงลำดับ
+ */
+async function sendTextMessage(userId, response) {
+  // 1) สปลิตข้อความตาม "[cut]"
+  const segments = response.split("[cut]").map(s => s.trim()).filter(Boolean);
+
+  // 2) วนลูปตามเซกเมนต์
+  for (const segment of segments) {
+
+    // ตรวจจับลิงก์รูป
+    const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
+    const images = [...segment.matchAll(imageRegex)];
+
+    // ตรวจจับลิงก์วิดีโอ
+    const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
+    const videos = [...segment.matchAll(videoRegex)];
+
+    // ตัดคำสั่งรูป/วิดีโอ ออก
+    let textPart = segment
+      .replace(imageRegex, '')
+      .replace(videoRegex, '')
+      .trim();
+
+    // 2.1) ส่งข้อความตัวอักษร (ถ้ามี)
+    if (textPart) {
+      await sendSimpleTextMessage(userId, textPart);
+    }
+
+    // 2.2) ส่งรูปทีละรูป
+    for (const match of images) {
+      const imageUrl = match[1];
+      await sendImageMessage(userId, imageUrl);
+    }
+
+    // 2.3) ส่งวิดีโอทีละอัน
+    for (const match of videos) {
+      const videoUrl = match[1];
+      await sendVideoMessage(userId, videoUrl);
+    }
+
+    // (ถ้าต้องการเว้นจังหวะเล็กน้อยระหว่างเซกเมนต์ ก็ใส่ setTimeout หรือ await sleep(...) ที่นี่)
+  }
 }
 
 
@@ -384,23 +429,21 @@ app.post('/webhook', async (req, res) => {
         
         // ตรวจสอบคำสั่ง ปิด/เปิด ai
         if (userMsg === "สวัสดีค่า แอดมิน Venus นะคะ จะมาดำเนินเรื่องต่อ") {
-          // ปิด ai
           const pageId = entry.id; 
           let userId = (webhookEvent.sender.id === pageId) 
             ? webhookEvent.recipient.id 
             : webhookEvent.sender.id;
           await setUserStatus(userId, false);
-          sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
+          await sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
           await saveChatHistory(userId, userMsg, "แอดมิน Venus สวัสดีค่ะ");
           continue;
         } else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
-          // เปิด ai
           const pageId = entry.id; 
           let userId = (webhookEvent.sender.id === pageId) 
             ? webhookEvent.recipient.id 
             : webhookEvent.sender.id;
           await setUserStatus(userId, true);
-          sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
+          await sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
           await saveChatHistory(userId, userMsg, "แอดมิน Venus ขอตัวก่อนนะคะ");
           continue;
         }
@@ -430,12 +473,12 @@ app.post('/webhook', async (req, res) => {
         // เช็กคำสั่ง ปิด/เปิด ai
         if (userMsg === "สวัสดีค่า แอดมิน Venus นะคะ จะมาดำเนินเรื่องต่อ") {
           await setUserStatus(userId, false);
-          sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
+          await sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
           await saveChatHistory(userId, userMsg, "แอดมิน Venus สวัสดีค่ะ");
           continue;
         } else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
           await setUserStatus(userId, true);
-          sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
+          await sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
           await saveChatHistory(userId, userMsg, "แอดมิน Venus ขอตัวก่อนนะคะ");
           continue;
         }
@@ -452,7 +495,7 @@ app.post('/webhook', async (req, res) => {
         const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
 
         await saveChatHistory(userId, userMsg, assistantMsg);
-        sendTextMessage(userId, assistantMsg);
+        await sendTextMessage(userId, assistantMsg);
 
       // -----------------------------
       // D) ถ้าเป็นไฟล์แนบ (image, ฯลฯ)
@@ -474,7 +517,7 @@ app.post('/webhook', async (req, res) => {
               type: "image_url",
               image_url: {
                 url: att.payload.url,
-                detail: "auto" // เปลี่ยนเป็น 'low'/'high' ได้
+                detail: "auto"
               }
             });
           } else {
@@ -498,7 +541,7 @@ app.post('/webhook', async (req, res) => {
         const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
 
         await saveChatHistory(userId, userContentArray, assistantMsg);
-        sendTextMessage(userId, assistantMsg);
+        await sendTextMessage(userId, assistantMsg);
 
       } else {
         console.log(">> [Webhook] Received event but not text/attachment:", webhookEvent);
