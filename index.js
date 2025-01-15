@@ -245,7 +245,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
 
     // ====== (A) ป้องกันวนลูป [cut] ซ้ำ ======
     // 1) ลบกรณีมี [cut][cut][cut] ติดกันเกินไป
-    assistantReply = assistantReply.replace(/\[cut\]{2,}/g, "[cut]");
+    assistantReply = assistantReply.replace(/\[cut\]{2,}/g, "[CUTTTT]");
     // 2) จำกัดจำนวน [cut] ทั้งหมดในข้อความ (เช่น ไม่เกิน 10)
     const cutList = assistantReply.split("[cut]");
     if (cutList.length > 10) {
