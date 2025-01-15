@@ -272,31 +272,41 @@ function sendTextMessage(userId, response) {
 
   // 2) วนลูปส่งทีละ segment
   for (let seg of segments) {
-    const segment = seg.trim(); // ตัดช่องว่างหัวท้าย
+    const segment = seg.trim(); 
+    if (!segment) continue; // ถ้า segment ว่างเปล่า ให้ข้าม
 
-    // ถ้า segment ว่างเปล่า (อาจเกิดจากกรณี [cut] ติดกัน) ข้ามได้
-    if (!segment) continue;
-
-    // ตรวจจับ [SEND_IMAGE:URL] ภายใน segment
+    // ตรวจจับ [SEND_IMAGE:URL]
     const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
     const images = [...segment.matchAll(imageRegex)];
 
-    // ตัดคำสั่ง [SEND_IMAGE:URL] ออกเพื่อส่งเป็นข้อความตัวอักษรก่อน
-    let textPart = segment.replace(imageRegex, '').trim();
+    // ตรวจจับ [SEND_VIDEO:URL]
+    const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
+    const videos = [...segment.matchAll(videoRegex)];
+
+    // ตัด [SEND_IMAGE:URL] และ [SEND_VIDEO:URL] ออกจาก text
+    let textPart = segment
+      .replace(imageRegex, '')
+      .replace(videoRegex, '')
+      .trim();
 
     // ส่งข้อความตัวอักษร (หากมี)
     if (textPart.length > 0) {
       sendSimpleTextMessage(userId, textPart);
     }
 
-    // ถัดมา ส่งรูป (ถ้ามี)
+    // ส่งรูป (ถ้ามี)
     for (const match of images) {
-      const imageUrl = match[1];
+      const imageUrl = match[1]; // ตัวที่ 1 คือ URL
       sendImageMessage(userId, imageUrl);
+    }
+
+    // ส่งวิดีโอ (ถ้ามี)
+    for (const match of videos) {
+      const videoUrl = match[1]; // ตัวที่ 1 คือ URL
+      sendVideoMessage(userId, videoUrl);
     }
   }
 }
-
 
 function sendSimpleTextMessage(userId, text) {
   const reqBody = {
