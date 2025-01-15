@@ -267,20 +267,36 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
 
 // ====================== 7) ฟังก์ชันส่งข้อความกลับ Facebook ======================
 function sendTextMessage(userId, response) {
-  // ถ้ามีแท็ก [SEND_IMAGE:URL] ก็แยกส่งรูปออกไป
-  const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
-  const images = [...response.matchAll(imageRegex)];
+  // 1) สปลิตข้อความตามคำว่า [cut]
+  const segments = response.split("[cut]");
 
-  let textPart = response.replace(imageRegex, '').trim();
+  // 2) วนลูปส่งทีละ segment
+  for (let seg of segments) {
+    const segment = seg.trim(); // ตัดช่องว่างหัวท้าย
 
-  if (textPart.length > 0) {
-    sendSimpleTextMessage(userId, textPart);
-  }
-  for (const match of images) {
-    const imageUrl = match[1];
-    sendImageMessage(userId, imageUrl);
+    // ถ้า segment ว่างเปล่า (อาจเกิดจากกรณี [cut] ติดกัน) ข้ามได้
+    if (!segment) continue;
+
+    // ตรวจจับ [SEND_IMAGE:URL] ภายใน segment
+    const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
+    const images = [...segment.matchAll(imageRegex)];
+
+    // ตัดคำสั่ง [SEND_IMAGE:URL] ออกเพื่อส่งเป็นข้อความตัวอักษรก่อน
+    let textPart = segment.replace(imageRegex, '').trim();
+
+    // ส่งข้อความตัวอักษร (หากมี)
+    if (textPart.length > 0) {
+      sendSimpleTextMessage(userId, textPart);
+    }
+
+    // ถัดมา ส่งรูป (ถ้ามี)
+    for (const match of images) {
+      const imageUrl = match[1];
+      sendImageMessage(userId, imageUrl);
+    }
   }
 }
+
 
 function sendSimpleTextMessage(userId, text) {
   const reqBody = {
