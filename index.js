@@ -8,8 +8,7 @@
  * - ไม่ตอบผู้ใช้ระหว่างปิด AI (แต่ยังบันทึกประวัติ)
  * - ป้องกัน Echo message (is_echo) ไม่ให้ตอบตัวเองซ้ำ
  ********************************************************/
-
-const express = require('express');
+express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
 const util = require('util');            // <--- เพิ่ม
