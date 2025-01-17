@@ -1,14 +1,4 @@
 /*******************************************************
- * index.js (โค้ดเต็ม – ป้องกันการเรียกซ้ำ และส่งรูป/วิดีโอก่อนข้อความ)
- * - ใช้ Express + body-parser (Webhook สำหรับ Facebook)
- * - MongoDB เก็บประวัติแชท (chat_history) และสถานะผู้ใช้ (active_user_status)
- * - ดึง systemInstructions จาก Google Docs + Google Sheets
- * - ใช้ OpenAI GPT ตอบ (model: "gpt-4o-mini" สามารถวิเคราะห์รูปได้)
- * - มีฟังก์ชันปิดระบบเอไอ ([ปิดระบบเอไอ]/[เปิดระบบเอไอ])
- * - ไม่ตอบผู้ใช้ระหว่างปิด AI (แต่ยังบันทึกประวัติ)
- * - ป้องกัน Echo message (is_echo) ไม่ให้ตอบตัวเองซ้ำ
- * - ป้องกันการวนลูปซ้ำด้วยการเช็ก event (echo/delivery/read/app_id) และ message.mid
- * - แยกข้อความตาม [cut] หากเจอหลาย [cut] ติดกัน จะบีบให้เหลือ [cut] เดียว
  ********************************************************/
 
 const express = require('express');
@@ -194,31 +184,46 @@ async function fetchSheetData(spreadsheetId, range) {
     const sheetsApi = await getSheetsApi();
     const response = await sheetsApi.spreadsheets.values.get({
       spreadsheetId,
-      range,
+      range
     });
     const rows = response.data.values;
-    if (!rows || rows.length === 0) {
-      console.log("No data found in sheet.");
-      return [];
-    }
+    if (!rows || rows.length === 0) return [];
     return rows;
-  } catch (error) {
-    console.error("Error fetching sheet data:", error);
+  } catch {
     return [];
   }
 }
 
-function transformSheetRowsToJSON(rows) {
-  return rows.map(row => {
-    return {
-      title: row[0] || "",
-      content: row[1] || ""
-    };
+/**
+ * parseSheetRowsToObjects:
+ * แปลงข้อมูลจาก Google Sheets ที่มาเป็นรูปแบบ [ [header...], [data...], [data...] ]
+ * ให้กลายเป็น array ของ object โดยเอา row แรกเป็นชื่อคอลัมน์
+ */
+function parseSheetRowsToObjects(rows) {
+  if (!rows || rows.length < 2) {
+    return [];
+  }
+  const headers = rows[0];
+  const dataRows = rows.slice(1);
+  return dataRows.map(row => {
+    let obj = {};
+    headers.forEach((headerName, colIndex) => {
+      obj[headerName] = row[colIndex] || "";
+    });
+    return obj;
   });
 }
 
-// ตัวแปรเพื่อเก็บข้อมูลที่ดึงมา
-let sheetJSON = [];  
+/**
+ * transformSheetRowsToJSON (จะเรียก parseSheetRowsToObjects แทนการ .map แบบเดิม)
+ */
+function transformSheetRowsToJSON(rows) {
+  // เรียก parseSheetRowsToObjects เพื่อให้ได้ JSON รูปแบบ header => value
+  return parseSheetRowsToObjects(rows);
+}
+
+let sheetJSON = [];
+
 
 
 // ====================== 5) สร้าง systemInstructions (ผสาน Docs + Sheets) ======================
