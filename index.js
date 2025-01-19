@@ -528,15 +528,15 @@ app.post('/webhook', async (req, res) => {
           const userMsg = webhookEvent.message.text;
 
           // เช็กคำสั่งปิด/เปิด AI (หากต้องการ)
-          if (userMsg === "สวัสดีค่า แอดมิน Venus นะคะ จะมาดำเนินเรื่องต่อ") {
+          if (userMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
             await setUserStatus(userId, false);
-            await sendSimpleTextMessage(userId, "แอดมิน Venus สวัสดีค่ะ");
-            await saveChatHistory(userId, userMsg, "แอดมิน Venus สวัสดีค่ะ");
+            await sendSimpleTextMessage(userId, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ");
+            await saveChatHistory(userId, userMsg, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ");
             continue;
-          } else if (userMsg === "ขอนุญาตส่งต่อให้ทางแอดมินประจำสนทนาต่อนะคะ") {
+          } else if (userMsg === "แอดมิน THAYA ยินดีดูแลลูกค้าค่ะ") {
             await setUserStatus(userId, true);
-            await sendSimpleTextMessage(userId, "แอดมิน Venus ขอตัวก่อนนะคะ");
-            await saveChatHistory(userId, userMsg, "แอดมิน Venus ขอตัวก่อนนะคะ");
+            await sendSimpleTextMessage(userId, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ");
+            await saveChatHistory(userId, userMsg, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ");
             continue;
           }
 
