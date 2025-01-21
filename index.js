@@ -1,9 +1,10 @@
 /*******************************************************
  * ตัวอย่างโค้ดพร้อมใช้งาน (Express.js)
- * - ตรวจจับคีย์เวิร์ด "สรุปยอดการสั่งซื้อ"
- * - ดึงข้อมูลชื่อ Facebook ผู้ใช้
- * - บันทึกข้อมูลลูกค้าลง MongoDB
- * - บันทึกออเดอร์ลง Google Sheet
+ * - ดึงชื่อ Facebook ลูกค้า
+ * - ตรวจจับคีย์เวิร์ด "สรุปยอดการสั่งซื้อ" ในข้อความจากผู้ใช้
+ * - ตอบด้วย GPT ตัวใหญ่
+ * - ตรวจสอบข้อความ "assistant" ก่อนส่งออก ถ้ามีคำว่า "สรุปยอด" => ทำ Action เพิ่มได้
+ * - บันทึกออเดอร์ลง Google Sheet + MongoDB
  *******************************************************/
 
 const express = require('express');
@@ -11,7 +12,7 @@ const bodyParser = require('body-parser');
 const request = require('request');
 const util = require('util');
 const requestPost = util.promisify(request.post);
-const requestGet = util.promisify(request.get); // สำหรับเรียก GET
+const requestGet = util.promisify(request.get);
 const { google } = require('googleapis');
 const { MongoClient } = require('mongodb');
 const { OpenAI } = require('openai');
@@ -31,9 +32,9 @@ const MONGO_URI = process.env.MONGO_URI;
 // สำหรับ Google Docs, Sheets
 const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL; // หรือฮาร์ดโค้ดได้ถ้าทดสอบ
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY;   // ใส่รูปแบบ key PEM
-const GOOGLE_DOC_ID = "xxxx...";  // ตัวอย่าง
-const SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU"; // ของคุณ
-const SHEET_RANGE = "ชีต1!A2:F";  // สมมติจะเขียนลงคอลัมน์ A-F
+const GOOGLE_DOC_ID = "xxxxx-your-doc-id-xxxxx";
+const SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU"; // ตัวอย่าง
+const SHEET_RANGE = "ชีต1!A2:H";  // สมมติจะเขียนลงคอลัมน์ A-H
 
 // ====================== 2) MongoDB ======================
 let mongoClient = null;
@@ -377,22 +378,40 @@ async function sendVideoMessage(userId, videoUrl) {
   }
 }
 
+/**
+ * sendTextMessage: ส่งข้อความ (assistant) กลับหา user
+ * พร้อมตรวจว่ามีคำว่า "สรุปยอด" ในข้อความบอทหรือไม่
+ */
 async function sendTextMessage(userId, response) {
   console.log(">>> sendTextMessage() raw response:", JSON.stringify(response));
+
+  // (A) ตรงนี้เพิ่มการตรวจสอบ "สรุปยอด" ในข้อความที่บอทจะส่งออก
+  if (response.includes("สรุปยอด")) {
+    console.log(">>> [BOT MESSAGE CHECK] assistant's response includes 'สรุปยอด'.");
+
+    // ตัวอย่าง: คุณอาจทำ Action เพิ่มเติม เช่น
+    // await someFunctionToHandleBotSummary(userId, response);
+    // หรือบันทึกลง DB, trigger อีเมล ฯลฯ
+  }
+
+  // (B) ส่วนแยก segment [cut] เหมือนเดิม
   response = response.replace(/\[cut\]{2,}/g, "[cut]");
   let segments = response.split("[cut]").map(s => s.trim());
   segments = segments.filter(seg => seg.length > 0);
   if (segments.length > 10) {
     segments = segments.slice(0, 10);
   }
+
   console.log(">>> segments:", segments.length, segments);
 
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     console.log(`>>> [Segment ${i+1}]`, JSON.stringify(segment));
+
     const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
     const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
 
+    // จับลิงก์รูป/วิดีโอออกจากข้อความ
     const images = [...segment.matchAll(imageRegex)];
     const videos = [...segment.matchAll(videoRegex)];
 
@@ -401,17 +420,17 @@ async function sendTextMessage(userId, response) {
       .replace(videoRegex, '')
       .trim();
 
-    // ส่งรูป
+    // (1) ส่งรูป
     for (const match of images) {
       const imageUrl = match[1];
       await sendImageMessage(userId, imageUrl);
     }
-    // ส่งวิดีโอ
+    // (2) ส่งวิดีโอ
     for (const match of videos) {
       const videoUrl = match[1];
       await sendVideoMessage(userId, videoUrl);
     }
-    // ส่งข้อความ
+    // (3) ส่งข้อความตัวอักษร
     if (textPart) {
       await sendSimpleTextMessage(userId, textPart);
     }
@@ -511,7 +530,7 @@ async function appendOrderToSheet(fbName, orderObj) {
 }
 
 /**
- * setCustomerStatus: อัปเดตสถานะลูกค้าใน MongoDB
+ * setCustomerStatusInDB: อัปเดตสถานะลูกค้าใน MongoDB
  */
 async function setCustomerStatusInDB(userId, newStatus) {
   const client = await connectDB();
@@ -528,9 +547,9 @@ async function setCustomerStatusInDB(userId, newStatus) {
 
 /**
  * checkAndSaveOrderSummary:
- * - ตรวจจับคำว่า "สรุปยอดการสั่งซื้อ"
- * - ถ้าพบ, เรียก GPT ตัวเล็ก parse
- * - ถ้า parse ได้, บันทึกลง Sheet + อัปเดตสถานะ = ORDERED
+ * - ตรวจจับคำว่า "สรุปยอดการสั่งซื้อ" ในข้อความผู้ใช้
+ * - ถ้าพบ => เรียก GPT ตัวเล็ก parse
+ * - ถ้า parse ได้ => บันทึกลง Sheet + อัปเดตสถานะ + เก็บลง collection orders
  */
 async function checkAndSaveOrderSummary(userId, userMsg) {
   if (!userMsg.includes("สรุปยอดการสั่งซื้อ")) {
@@ -636,21 +655,22 @@ app.post('/webhook', async (req, res) => {
             continue;
           }
 
-          // เรียกฟังก์ชันตรวจจับสรุปยอด และบันทึก
+          // (1) ตรวจจับสรุปยอดจาก "ข้อความผู้ใช้"
           await checkAndSaveOrderSummary(userId, userMsg);
 
+          // (2) ถ้า AI ปิด => บอทไม่ตอบ
           if (!aiEnabled) {
-            // บอทไม่ตอบ
             await saveChatHistory(userId, userMsg, "");
             continue;
           }
 
-          // ถ้า AI เปิด => call GPT
+          // (3) ถ้า AI เปิด => call GPT
           const history = await getChatHistory(userId);
           const systemInstructions = buildSystemInstructions();
           const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
 
           await saveChatHistory(userId, userMsg, assistantMsg);
+          // (4) ส่งข้อความบอทออกไป (จะตรวจ “สรุปยอด” ในassistantMsg ที่นี่ด้วย)
           await sendTextMessage(userId, assistantMsg);
 
         } else if (webhookEvent.message && webhookEvent.message.attachments) {
@@ -678,9 +698,6 @@ app.post('/webhook', async (req, res) => {
             }
           }
 
-          // แนวทาง: ไฟล์แนบไม่น่าจะเป็นสรุปออเดอร์ได้
-          // จึงไม่เรียก checkAndSaveOrderSummary
-
           if (!aiEnabled) {
             await saveChatHistory(userId, userContentArray, "");
             continue;
@@ -691,6 +708,7 @@ app.post('/webhook', async (req, res) => {
           const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
 
           await saveChatHistory(userId, userContentArray, assistantMsg);
+          // ส่งข้อความออกไป (ตรวจ “สรุปยอด” ถ้ามี)
           await sendTextMessage(userId, assistantMsg);
 
         } else {
