@@ -1,11 +1,12 @@
 /*******************************************************
+ * เพิ่มโค้ดบางส่วนเข้าไปในไฟล์หลัก
  *******************************************************/
 
 const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
-const util = require('util');            // <--- สำหรับ promisify
-const requestPost = util.promisify(request.post); // <--- ใช้ await requestPost
+const util = require('util');
+const requestPost = util.promisify(request.post);
 const { google } = require('googleapis');
 const { MongoClient } = require('mongodb');
 const { OpenAI } = require('openai');
@@ -16,7 +17,7 @@ app.use(bodyParser.json());
 // ====================== 1) ENV Config ======================
 const PORT = process.env.PORT || 3000;
 
-// ควรเก็บไว้ใน Environment หรือไฟล์ config แยก
+// ควรเก็บไว้ใน Environment
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN; 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "AiDee_a4wfaw4";
@@ -25,14 +26,21 @@ const MONGO_URI = process.env.MONGO_URI;
 // หากมีการเชื่อมต่อ Google Docs, Sheets
 const GOOGLE_CLIENT_EMAIL = "aitar-888@eminent-wares-446512-j8.iam.gserviceaccount.com";
 const GOOGLE_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDGhyeINArKZgaV\nitEcK+o89ilPYeRNTNZgJT7VNHB5hgNLLeAcFLJ7IlCIqTLMoJEnnoDQil6aKaz8\nExVL83uSXRrzk4zQvtt3tIP31+9wOCb9D4ZGWfVP1tD0qdD4WJ1qqg1j1/8879pH\nUeQGEMuCnyVbcQ3GbYQjyYb3wEz/Qv7kMVggF+MIaGGw2NQwM0XcufSFtyxvvX2S\nb8uGc1A8R+Dn/tmcgMODhbtEgcMg6yXI5Y26MPfDjVrEbk0lfCr7IGFJX4ASYeKl\n0jhm0RGb+aya2cb55auLN3VPO5MQ+cOp8gHBf5GiC/YgF1gbRgF5b7LgmENBxSfH\nb3WVQodLAgMBAAECggEACKB14M7LdekXZHyAQrZL0EitbzQknLv33Xyw2B3rvJ7M\nr4HM/nC4eBj7y+ciUc8GZQ+CWc2GzTHTa66+mwAia1qdYbPp3LuhGM4Leq5zn/o+\nA3rJuG6PS4qyUMy89msPXW5fSj/oE535QREiFKYP2dtlia2GI4xoag+x9uZwfMUO\nWKEe7tiUoZQEiGhwtjLq9lyST4kGGmlhNee9OyhDJcw4uCt8Cepr++hMDleWUF6c\nX0nbGmoSS0sZ5Boy8ATMhw/3luaOAlTUEz/nVDvbbWlNL9etwLKiAVw+AQXsPHNW\nNWF7gyEIsEi0qSM3PtA1X7IdReRXHqmfiZs0J3qSQQKBgQD1+Yj37Yuqj8hGi5PY\n+M0ieMdGcbUOmJsM1yUmBMV4bfaTiqm504P6DIYAqfDDWeozcHwcdpG1AfFAihEi\nh6lb0qRk8YaGbzvac8mWhwo/jDA5QB97fjFa6uwtlewZ0Er/U3QmOeVVnVC1y1b0\nrbJD5yjvI3ve+gpwAz0glpIMiwKBgQDOnpD7p7ylG4NQunqmzzdozrzZP0L6EZyE\n141st/Hsp9rtO9/ADuH6WhpirQ516l5LLv7mLPA8S9CF/cSdWF/7WlxBPjM8WRs9\nACFNBJIwUfjzPnvECmtsayzRlKuyCAspnNSkzgtdtvf2xI82Z3BGov9goZfu+D4A\n36b1qXsIQQKBgQCO1CojhO0vyjPKOuxL9hTvqmBUWFyBMD4AU8F/dQ/RYVDn1YG+\npMKi5Li/E+75EHH9EpkO0g7Do3AaQNG4UjwWVJcfAlxSHa8Mp2VsIdfilJ2/8KsX\nQ2yXVYh04/Rn/No/ro7oT4AKmcGu/nbstxuncEgFrH4WOOzspATPsn72BwKBgG5N\nBAT0NKbHm0B7bIKkWGYhB3vKY8zvnejk0WDaidHWge7nabkzuLtXYoKO9AtKxG/K\ndNUX5F+r8XO2V0HQLd0XDezecaejwgC8kwp0iD43ZHkmQBgVn+dPB6wSe94coSjj\nyjj4reSnipQ3tmRKsAtldIN3gI5YA3Gf85dtlHqBAoGAD5ePt7cmu3tDZhA3A8f9\no8mNPvqz/WGs7H2Qgjyfc3jUxEGhVt1Su7J1j+TppfkKtJIDKji6rVA9oIjZtpZT\ngxnU6hcYuiwbLh3wGEFIjP1XeYYILudqfWOEbwnxD1RgMkCqfSHf/niWlfiH6p3F\ndnBsLY/qXdKfS/OXyezAm4M=\n-----END PRIVATE KEY-----\n";
+
 const GOOGLE_DOC_ID = "1IDvCXWa_5QllMTKrVSvhLRQPNNGkYgxb8byaDGGEhyU";
-const SPREADSHEET_ID = "1esN_P6JuPzYUGesR60zVuIGeuvSnRM1hlyaxCJbhI_c";
-const SHEET_RANGE = "ชีต1!A2:B28"; 
+
+/** 
+ * ชีตสำหรับบันทึกออเดอร์ 
+ *  - ชื่อชีตว่าอะไรให้แก้ range ให้สอดคล้อง 
+ *  - ต้องการใส่ข้อมูลกี่คอลัมน์ก็ปรับได้
+ */
+const SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
+const SHEET_NAME_FOR_ORDERS = "ชีต1";
+const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:G`;  // เริ่มที่แถว 2, คอลัมน์ A-G (ตัวอย่าง)
 
 // ====================== 2) MongoDB ======================
 let mongoClient = null;
 
-/** ฟังก์ชันเชื่อมต่อ MongoDB (global) */
 async function connectDB() {
   if (!mongoClient) {
     mongoClient = new MongoClient(MONGO_URI);
@@ -42,20 +50,13 @@ async function connectDB() {
   return mongoClient;
 }
 
-/**
- * normalizeRoleContent: บังคับ content ให้เป็น string หรือ array
- * ป้องกัน error เวลาส่งไป GPT
- */
 function normalizeRoleContent(role, content) {
-  // ถ้าเป็น string อยู่แล้ว => ใช้ได้
   if (typeof content === "string") {
     return { role, content };
   }
-  // ถ้าเป็นอาเรย์ => ใช้ได้ (เช่น กรณีรูป)
   if (Array.isArray(content)) {
     return { role, content };
   }
-  // กรณีอื่น => แปลงเป็น string ไว้ก่อน
   return { role, content: JSON.stringify(content) };
 }
 
@@ -66,25 +67,20 @@ async function getChatHistory(userId) {
   const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
   
   return chats.map(ch => {
-    // ลอง parse เพื่อดูว่าเป็น array หรือเปล่า
     try {
       const parsed = JSON.parse(ch.content);
       return normalizeRoleContent(ch.role, parsed);
     } catch (err) {
-      // ถ้า parse ไม่ได้ แสดงว่าเป็น string ปกติ
       return normalizeRoleContent(ch.role, ch.content);
     }
   });
 }
 
-
-/** บันทึกข้อความ user และข้อความตอบ (assistant) ลง DB */
 async function saveChatHistory(userId, userMsg, assistantMsg) {
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("chat_history");
 
-  // userMsg อาจเป็น string หรือ array => แปลงเป็น string หากไม่ใช่
   let userMsgToSave;
   if (typeof userMsg === "string") {
     userMsgToSave = userMsg;
@@ -133,6 +129,21 @@ async function setUserStatus(userId, aiEnabled) {
   );
 }
 
+/**
+ * เก็บสถานะการสั่งซื้อ (เช่น "ordered", "pending", "canceled") 
+ * หรือจะใช้ collection เดียวกับ active_user_status ก็ได้
+ */
+async function updateCustomerOrderStatus(userId, status) {
+  const client = await connectDB();
+  const db = client.db("chatbot");
+  const coll = db.collection("customer_order_status");
+
+  await coll.updateOne(
+    { senderId: userId },
+    { $set: { orderStatus: status, updatedAt: new Date() } },
+    { upsert: true }
+  );
+}
 
 // ====================== 3) ดึง systemInstructions จาก Google Docs ======================
 let googleDocInstructions = "";
@@ -168,8 +179,7 @@ async function fetchGoogleDocInstructions() {
   }
 }
 
-
-// ====================== 4) ดึงข้อมูลจาก Google Sheets + แปลงเป็น JSON ======================
+// ====================== 4) หากต้องการดึงข้อมูลจาก Google Sheet เดิม เพื่อนำมาใช้อ้างอิง ======================
 async function getSheetsApi() {
   const sheetsAuth = new google.auth.JWT({
     email: GOOGLE_CLIENT_EMAIL,
@@ -179,6 +189,7 @@ async function getSheetsApi() {
   return google.sheets({ version: 'v4', auth: sheetsAuth });
 }
 
+/** ถ้าต้องการอ่านข้อมูลอื่น ๆ จาก Sheet (นอกจากบันทึกออเดอร์) ก็ใส่โค้ดได้ที่นี่ */
 async function fetchSheetData(spreadsheetId, range) {
   try {
     const sheetsApi = await getSheetsApi();
@@ -194,11 +205,6 @@ async function fetchSheetData(spreadsheetId, range) {
   }
 }
 
-/**
- * parseSheetRowsToObjects:
- * แปลงข้อมูลจาก Google Sheets ที่มาเป็นรูปแบบ [ [header...], [data...], [data...] ]
- * ให้กลายเป็น array ของ object โดยเอา row แรกเป็นชื่อคอลัมน์
- */
 function parseSheetRowsToObjects(rows) {
   if (!rows || rows.length < 2) {
     return [];
@@ -214,79 +220,31 @@ function parseSheetRowsToObjects(rows) {
   });
 }
 
-/**
- * transformSheetRowsToJSON (จะเรียก parseSheetRowsToObjects แทนการ .map แบบเดิม)
- */
-function transformSheetRowsToJSON(rows) {
-  // เรียก parseSheetRowsToObjects เพื่อให้ได้ JSON รูปแบบ header => value
-  return parseSheetRowsToObjects(rows);
-}
-
-let sheetJSON = [];
-
-
-
-// ====================== 5) สร้าง systemInstructions (ผสาน Docs + Sheets) ======================
+// ====================== 5) สร้าง systemInstructions ======================
 function buildSystemInstructions() {
-  // แปลง Sheet JSON เป็น string
-  const sheetsDataString = JSON.stringify(sheetJSON, null, 2);
-
-  // ผสานกับข้อความจาก Google Docs
+  // รวม instructions จาก Google Docs + Policy อื่น ๆ ตามต้องการ
   const finalSystemInstructions = `
 You are an AI chatbot for THAYA. 
 Below are instructions from the Google Doc:
 ---
 ${googleDocInstructions}
 
-Below is additional data from Google Sheets:
----
-${sheetsDataString}
-
-หากผู้ใช้ส่งรูปภาพ (If the user sends an image):
-
-1) ถ้าเป็นรูปสลิปโอนเงิน (Money Transfer Slip):
-   - ให้คุณอ่านข้อความบนสลิปเฉพาะ “ยอดเงินที่โอน” และ “ชื่อผู้รับโอน” เท่านั้น
-   - โดย “ผู้รับโอน” ในบริบทนี้ คือผู้ขายหรือนักพัฒนาที่สร้างคุณขึ้นมา เพื่ออำนวยความสะดวกในการซื้อขาย
-   - ห้ามเปิดเผยหรือวิเคราะห์ข้อมูลส่วนตัวหรือข้อมูลบัญชีธนาคารอื่น ๆ
-
-2) ถ้าเป็นรูปประเภทอื่น (เช่น รูปสินค้า):
-   - คุณอาจบรรยาย/ตอบตามคำถามของผู้ใช้ (เช่น ราคาสินค้า, คุณสมบัติ, วิธีใช้)
-   - แต่ห้ามคาดเดาหรือเปิดเผยข้อมูลส่วนบุคคลจากภาพ (หากปรากฏ)
-
-3) ถ้าเป็นรูปที่อยู่สำหรับการจัดส่ง (ซึ่งอาจมี ชื่อ และ เบอร์โทร ของผู้รับ):
-   - ให้คุณใช้ข้อมูลดังกล่าวเฉพาะเพื่อการจัดส่งเท่านั้น (เช่น จัดทำใบที่อยู่/ฉลากพัสดุ/สรุปยอด/ยืนยันคำสั่งซื้อ)
-   - ห้ามวิเคราะห์ หรือนำข้อมูลส่วนตัวไปใช้ในจุดประสงค์อื่น นอกเหนือจากการส่งสินค้า
-   - ไม่ควรเปิดเผยรายละเอียดชื่อ-เบอร์โทรเพิ่มเติม ยกเว้นเท่าที่ผู้ใช้ต้องการ เพื่อยืนยันขั้นตอนจัดส่ง
-
-4) ในทุกกรณี ห้ามให้ข้อมูลหรือวิเคราะห์ส่วนที่เป็นข้อมูลส่วนบุคคล นอกเหนือจากความจำเป็นในการตอบคำถามหรือการสั่งซื้อของผู้ใช้
-
-5) ใช้ข้อมูลส่วนตัวเฉพาะเพื่อการจัดส่งและการดำเนินธุรกรรมที่ผู้ใช้ยินยอมไว้เท่านั้น
-
-6) หากไม่แน่ใจว่ามีการละเมิดความเป็นส่วนตัวหรือไม่ ให้หลีกเลี่ยงการเปิดเผยรายละเอียดเชิงลึก และแจ้งเตือนผู้ใช้ตามสมควร
-
-
-Rules:
-- Please use the data above as reference for answering user questions.
-- If not related, you may answer as usual.
+Rules about images, privacy, etc...
+(ย่อเนื้อหาความยาวได้ตามสะดวก)
 `.trim();
 
   return finalSystemInstructions;
 }
 
-
-// ====================== 6) เรียก GPT (รองรับทั้งข้อความและรูป) ======================
+// ====================== 6) เรียก GPT เพื่อโต้ตอบทั่วไป ======================
 async function getAssistantResponse(systemInstructions, history, userContent) {
   try {
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-    // สร้าง messages เริ่มจาก system + ประวัติ
     const messages = [
       { role: "system", content: systemInstructions },
-      // ประวัติ (map ให้เป็นรูปแบบ { role, content })
       ...history
     ];
-
-    // ใส่ userContent (string / array) => normalize
     let finalUserMessage = normalizeRoleContent("user", userContent);
     messages.push(finalUserMessage);
 
@@ -297,16 +255,13 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
       temperature: 0.1,
     });
 
-    // ดึงข้อความของ assistant
     let assistantReply = response.choices[0].message.content;
     if (typeof assistantReply !== "string") {
       assistantReply = JSON.stringify(assistantReply);
     }
 
-    // ====== (A) ป้องกันวนลูป [cut] ซ้ำ ======
-    // 1) รวม [cut][cut][cut] ติดกันให้เหลือ [cut] เดียว
+    // Cleanup กันวนลูป
     assistantReply = assistantReply.replace(/\[cut\]{2,}/g, "[cut]");
-    // 2) จำกัดจำนวน [cut] ทั้งหมดในข้อความ (ถ้าเกิน 10 ก็เอาแค่ 10 segment)
     const cutList = assistantReply.split("[cut]");
     if (cutList.length > 10) {
       assistantReply = cutList.slice(0, 10).join("[cut]");
@@ -320,10 +275,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
   }
 }
 
-
-// ====================== 7) ฟังก์ชันส่งข้อความกลับ Facebook (async/await) ======================
-
-/** ส่งข้อความตัวอักษร (await) */
+// ====================== 7) ฟังก์ชันส่งข้อความ/รูป/วิดีโอกลับทาง Messenger ======================
 async function sendSimpleTextMessage(userId, text) {
   const reqBody = {
     recipient: { id: userId },
@@ -344,7 +296,6 @@ async function sendSimpleTextMessage(userId, text) {
   }
 }
 
-/** ส่งรูปภาพ (await) */
 async function sendImageMessage(userId, imageUrl) {
   const reqBody = {
     recipient: { id: userId },
@@ -370,7 +321,6 @@ async function sendImageMessage(userId, imageUrl) {
   }
 }
 
-/** ส่งวิดีโอ (await) */
 async function sendVideoMessage(userId, videoUrl) {
   const reqBody = {
     recipient: { id: userId },
@@ -396,79 +346,185 @@ async function sendVideoMessage(userId, videoUrl) {
   }
 }
 
-
-/**
- * ฟังก์ชันหลักในการสั่งส่งข้อความ
- * - จะสแกน [SEND_IMAGE], [SEND_VIDEO]
- * - ส่งรูป/วิดีโอก่อน แล้วค่อยส่งข้อความ
- * - แยก segment ด้วย [cut] ทีละชุด
- */
+/** ส่งข้อความที่อาจมี [SEND_IMAGE:URL] หรือ [SEND_VIDEO:URL] และ [cut] */
 async function sendTextMessage(userId, response) {
-  // Debug: ดูข้อความดิบ
-  console.log(">>> sendTextMessage() raw response:", JSON.stringify(response));
-
-  // 1) รวม [cut][cut][cut] ติดกันให้เหลือครั้งเดียว
   response = response.replace(/\[cut\]{2,}/g, "[cut]");
+  let segments = response.split("[cut]").map(s => s.trim()).filter(s => s);
+  if (segments.length > 10) segments = segments.slice(0, 10);
 
-  // 2) split ตาม [cut]
-  let segments = response.split("[cut]").map(s => s.trim());
-
-  // 3) filter empty
-  segments = segments.filter(seg => seg.length > 0);
-
-  // 4) limit ไม่เกิน 10 segment
-  if (segments.length > 10) {
-    segments = segments.slice(0, 10);
-  }
-
-  console.log(">>> segments:", segments.length, segments);
-
-  // 5) วนลูปทีละ segment
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
-    console.log(`>>> [Segment ${i+1}]`, JSON.stringify(segment));
-
-    // --- ตรวจจับลิงก์รูป ---
+  for (let segment of segments) {
     const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
-    // --- ตรวจจับลิงก์วิดีโอ ---
     const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
 
-    // หาให้หมดใน segment
+    // ดึง url ทั้งหมด
     const images = [...segment.matchAll(imageRegex)];
     const videos = [...segment.matchAll(videoRegex)];
 
-    // ตัดคำสั่งออกจากข้อความ
+    // ตัดคำสั่งออกให้เหลือแค่ text
     let textPart = segment
       .replace(imageRegex, '')
       .replace(videoRegex, '')
       .trim();
 
-    // (1) ส่งรูปก่อน
+    // ส่งรูป
     for (const match of images) {
       const imageUrl = match[1];
       await sendImageMessage(userId, imageUrl);
     }
-
-    // (2) ส่งวิดีโอก่อน
+    // ส่งวิดีโอ
     for (const match of videos) {
       const videoUrl = match[1];
       await sendVideoMessage(userId, videoUrl);
     }
-
-    // (3) ส่งข้อความ (ถ้ามี)
+    // ส่งข้อความ
     if (textPart) {
       await sendSimpleTextMessage(userId, textPart);
     }
   }
 }
 
+/* =========================================================
+ *          โค้ดส่วนเพิ่มเติมสำหรับ "สรุปยอดการสั่งซื้อ"
+ * ========================================================= */
 
+/**
+ * checkOrderSummary: เช็กว่า ข้อความนั้นน่าจะเป็น "สรุปยอดการสั่งซื้อ" หรือไม่
+ * อาจใช้ regex ง่าย ๆ หรือเช็กคีย์เวิร์ด "สรุปยอดการสั่งซื้อ", "โปรโมชั่น", "ราคารวม" ฯลฯ
+ */
+function checkOrderSummary(text) {
+  // ตัวอย่างเช็กง่าย ๆ ว่ามีคำว่า "สรุปยอดการสั่งซื้อ" ไหม
+  // (ในงานจริงอาจต้องการเงื่อนไขยืดหยุ่นกว่านี้ เช่น มีคำว่า "โปรโมชั่น" และ "ราคารวม" ด้วย)
+  if (!text) return false;
+  const pattern = /สรุปยอดการสั่งซื้อ/i;
+  return pattern.test(text);
+}
+
+/**
+ * extractOrderDataWithGPT:
+ *  - เรียก GPT "gpt-4o-mini" อีกครั้ง เพื่อวิเคราะห์โครงสร้างของข้อความสรุปยอด
+ *  - หยิบข้อมูลที่ต้องการ เช่น ชื่อ, ที่อยู่, เบอร์โทร, โปรโมชั่น, ราคารวม, วิธีชำระเงิน
+ *  - return ในรูป JSON
+ */
+async function extractOrderDataWithGPT(orderText) {
+  const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+  // system prompt: อธิบายให้ GPT ช่วยสกัดข้อมูล
+  const sysPrompt = `
+คุณเป็นโปรแกรมที่ช่วยสกัดข้อมูลออเดอร์จากข้อความสรุปยอด
+Input ด้านล่างคือข้อความสรุปยอดที่เขียนโดยผู้ใช้:
+ต้องการให้คุณตอบเป็น JSON format เท่านั้น (ห้ามมีข้อความอื่นนอกจาก JSON)
+
+Data ที่ต้องการ:
+{
+  "promotion": (string) รายละเอียดโปรโมชั่น ถ้ามี,
+  "customer_name": (string) ชื่อ,
+  "address": (string) ที่อยู่,
+  "phone": (string) เบอร์โทร,
+  "total": (string or number) ยอดรวม,
+  "payment_method": (string) วิธีการชำระเงิน (ถ้าเจอในข้อความ ถ้าไม่เจอให้ใส่ empty string)
+}
+ถ้าหาไม่เจอให้ใส่ค่าว่าง ("") 
+เข้าใจหรือไม่
+  `.trim();
+
+  try {
+    const messages = [
+      { role: "system", content: sysPrompt },
+      { role: "user", content: orderText }
+    ];
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages,
+      temperature: 0.0,
+    });
+
+    let gptAnswer = response.choices[0].message.content || "{}";
+    // พยายาม parse JSON
+    let data;
+    try {
+      data = JSON.parse(gptAnswer);
+    } catch (e) {
+      data = {};
+    }
+    return data;
+
+  } catch (e) {
+    console.error("extractOrderDataWithGPT error:", e);
+    return {};
+  }
+}
+
+/**
+ * saveOrderToSheet:
+ *  บันทึกข้อมูล order ลง Google Sheet (บรรทัดถัดไป)
+ *  ตัวอย่างใช้ method "append" เพื่อเพิ่มข้อมูลท้ายตาราง
+ */
+async function saveOrderToSheet(orderData) {
+  try {
+    const sheetsApi = await getSheetsApi();
+
+    // เตรียม values ตามลำดับคอลัมน์ เช่น [วันที่, ชื่อ, ที่อยู่, เบอร์, โปรโมชั่น, ราคารวม, วิธีจ่าย]
+    // ในตัวอย่างนี้: A=Timestamp, B=Name, C=Address, D=Phone, E=Promotion, F=Total, G=Payment
+    const timestamp = new Date().toLocaleString("th-TH");
+    const rowValues = [
+      timestamp,
+      orderData.customer_name || "",
+      orderData.address || "",
+      orderData.phone || "",
+      orderData.promotion || "",
+      orderData.total || "",
+      orderData.payment_method || "",
+    ];
+
+    const request = {
+      spreadsheetId: SPREADSHEET_ID,
+      range: ORDERS_RANGE, 
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      resource: {
+        values: [rowValues],
+      },
+    };
+
+    const result = await sheetsApi.spreadsheets.values.append(request);
+    console.log("Order saved to sheet:", result.statusText);
+
+  } catch (err) {
+    console.error("saveOrderToSheet error:", err);
+  }
+}
+
+/**
+ * handleOrderSummary: 
+ *  รวมกระบวนการ: 
+ *   1) ตรวจว่าข้อความเป็นสรุปยอดไหม 
+ *   2) ถ้าใช่ -> เรียก GPT เพื่อดึงข้อมูล 
+ *   3) เซฟลง Sheets 
+ *   4) อัปเดตสถานะลูกค้าใน Mongo
+ */
+async function handleOrderSummary(userId, textMessage) {
+  // 1) เช็กว่าเป็นข้อความสรุปยอดไหม
+  const isSummary = checkOrderSummary(textMessage);
+  if (!isSummary) {
+    return; // ไม่ใช่ ก็ไม่ทำอะไร
+  }
+
+  // 2) ใช้ GPT สกัดข้อมูล
+  const orderData = await extractOrderDataWithGPT(textMessage);
+
+  // 3) บันทึกลงชีต
+  await saveOrderToSheet(orderData);
+
+  // 4) เปลี่ยนสถานะลูกค้าใน Mongo ว่า "ordered"
+  await updateCustomerOrderStatus(userId, "ordered");
+}
+
+//
 // ====================== 8) Webhook Routes & Startup ======================
-
-// ---- เพิ่มตัวแปร global สำหรับกัน mid ซ้ำ (กันลูป) ----
+//
 const processedMessageIds = new Set();
 
-// ยืนยัน webhook กับ Facebook
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -480,17 +536,12 @@ app.get('/webhook', (req, res) => {
   return res.sendStatus(403);
 });
 
-
-// รับ event จาก Messenger
 app.post('/webhook', async (req, res) => {
   if (req.body.object === 'page') {
     for (const entry of req.body.entry) {
-      if (!entry.messaging || entry.messaging.length === 0) {
-        continue;
-      }
+      if (!entry.messaging || entry.messaging.length === 0) continue;
 
       for (const webhookEvent of entry.messaging) {
-        // A) ตรวจจับ event ที่ไม่ใช่ข้อความ user หรือเป็น echo/delivery/read/app_id
         if (
           webhookEvent.message?.is_echo ||
           webhookEvent.delivery ||
@@ -501,7 +552,6 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
 
-        // B) ป้องกัน message.mid ซ้ำ
         if (webhookEvent.message && webhookEvent.message.mid) {
           const mid = webhookEvent.message.mid;
           if (processedMessageIds.has(mid)) {
@@ -512,22 +562,18 @@ app.post('/webhook', async (req, res) => {
           }
         }
 
-        // C) หา userId
         const pageId = entry.id; 
         let userId = (webhookEvent.sender.id === pageId)
           ? webhookEvent.recipient.id
           : webhookEvent.sender.id;
 
-        // D) เช็คสถานะ aiEnabled
         const userStatus = await getUserStatus(userId);
         const aiEnabled = userStatus.aiEnabled;
 
-        // E) ประมวลผลกรณีเป็น text หรือ attachment
+        // --- Handle text ---
         if (webhookEvent.message && webhookEvent.message.text) {
-          // เคสข้อความ (Text)
           const userMsg = webhookEvent.message.text;
 
-          // เช็กคำสั่งปิด/เปิด AI (หากต้องการ)
           if (userMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
             await setUserStatus(userId, false);
             await sendSimpleTextMessage(userId, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ");
@@ -540,26 +586,28 @@ app.post('/webhook', async (req, res) => {
             continue;
           }
 
-          // ถ้า AI ปิด ไม่ตอบ
           if (!aiEnabled) {
             await saveChatHistory(userId, userMsg, "");
             continue;
           }
 
-          // AI เปิด => เรียก GPT
+          // ========== จุดสำคัญ: เรียก handleOrderSummary =============
+          // ให้มันเช็กว่าข้อความเป็น "สรุปยอด" รึเปล่า ถ้าใช่ ก็ parse + บันทึก
+          await handleOrderSummary(userId, userMsg);
+          // ============================================================
+
+          // AI ตอบ
           const history = await getChatHistory(userId);
           const systemInstructions = buildSystemInstructions();
           const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
 
-          // บันทึกและส่ง
           await saveChatHistory(userId, userMsg, assistantMsg);
           await sendTextMessage(userId, assistantMsg);
 
+        // --- Handle attachments (images, etc.) ---
         } else if (webhookEvent.message && webhookEvent.message.attachments) {
-          // เคสไฟล์แนบ (image, video, ฯลฯ)
           const attachments = webhookEvent.message.attachments;
 
-          // สร้าง content array สำหรับผู้ใช้
           let userContentArray = [{
             type: "text",
             text: "ผู้ใช้ส่งไฟล์แนบ"
@@ -575,22 +623,18 @@ app.post('/webhook', async (req, res) => {
                 }
               });
             } else {
-              // เป็นไฟล์อื่น ๆ (audio, video, location, etc.)
-              // ตัวอย่าง: ถ้ายังไม่รองรับ ก็ใส่เป็น text ธรรมดา
               userContentArray.push({
                 type: "text",
-                text: `ไฟล์แนบประเภท: ${att.type} (ยังไม่รองรับส่งต่อเป็นรูป/วิดีโอ)`,
+                text: `ไฟล์แนบประเภท: ${att.type}`
               });
             }
           }
 
-          // ถ้า AI ปิด ไม่ตอบ
           if (!aiEnabled) {
             await saveChatHistory(userId, userContentArray, "");
             continue;
           }
 
-          // AI เปิด => เรียก GPT
           const history = await getChatHistory(userId);
           const systemInstructions = buildSystemInstructions();
           const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
@@ -603,30 +647,21 @@ app.post('/webhook', async (req, res) => {
         }
       }
     }
-
-    // ตอบกลับ Facebook ว่าได้รับ event
     res.status(200).send("EVENT_RECEIVED");
-
   } else {
     res.sendStatus(404);
   }
 });
 
-
-// ====================== Start Server ======================
 app.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT}`);
 
   try {
-    // 1) เชื่อมต่อ DB
     await connectDB();
-
-    // 2) ดึง instructions จาก Google Docs
     await fetchGoogleDocInstructions();
-
-    // 3) ดึงข้อมูลจาก Sheets
-    const rows = await fetchSheetData(SPREADSHEET_ID, SHEET_RANGE);
-    sheetJSON = transformSheetRowsToJSON(rows);
+    // ถ้ามีการโหลด Sheet เดิมมาใช้อ้างอิง ก็ทำได้:
+    // const rows = await fetchSheetData(SPREADSHEET_ID, "INSTRUCTIONS!A1:B10");
+    // console.log("Sheet data:", rows);
 
     console.log("Startup completed. Ready to receive webhooks.");
   } catch (err) {
