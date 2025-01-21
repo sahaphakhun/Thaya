@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 3000;
 // ควรเก็บไว้ใน Environment หรือไฟล์ config แยก
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN; 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "XianTA1234";
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "AiDee_a4wfaw4";
 const MONGO_URI = process.env.MONGO_URI;
 
 // หากมีการเชื่อมต่อ Google Docs, Sheets
