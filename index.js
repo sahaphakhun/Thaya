@@ -1,13 +1,14 @@
 /*******************************************************
  * ตัวอย่างโค้ด chatbot + Google Docs Instructions + 
  * Google Sheets (เดิม) สำหรับ INSTRUCTIONS + 
- * Google Sheets (ใหม่) สำหรับบันทึกออเดอร์
+ * Google Sheets (ใหม่) สำหรับบันทึกออเดอร์ (เพิ่มชื่อเฟซ + debug)
  *******************************************************/
 const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
 const util = require('util');            
 const requestPost = util.promisify(request.post);
+const requestGet = util.promisify(request.get);     // <--- สำหรับ get profile
 const { google } = require('googleapis');
 const { MongoClient } = require('mongodb');
 const { OpenAI } = require('openai');
@@ -39,9 +40,9 @@ const SHEET_RANGE = "ชีต1!A2:B28";  // Range สำหรับดึง�
 
 // ------------------- (C) Google Sheet สำหรับ "บันทึกออเดอร์" (ใหม่) -------------------
 const ORDERS_SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
-// สมมติว่าเราบันทึกในชีตชื่อ "บันทึกออเดอร์" (หรือชื่ออื่นที่คุณใช้)
+// เพิ่มคอลัมน์เป็น 8 คอลัมน์ (A2:H2) => [timestamp, facebookName, customerName, address, phone, promo, total, payment]
 const SHEET_NAME_FOR_ORDERS = "บันทึกออเดอร์";
-const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:G`; // เริ่มเก็บที่แถว 2, คอลัมน์ A-G (ตัวอย่าง)
+const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:H`; // เริ่มเก็บที่แถว 2, คอลัมน์ A-H
 
 // ====================== 2) MongoDB ======================
 let mongoClient = null;
@@ -100,12 +101,14 @@ async function saveChatHistory(userId, userMsg, assistantMsg) {
     userMsgToSave = JSON.stringify(userMsg);
   }
 
+  console.log("[DEBUG] Saving chat history...");
   await coll.insertOne({
     senderId: userId,
     role: "user",
     content: userMsgToSave,
     timestamp: new Date(),
   });
+  console.log(`[DEBUG] Saved user message. userId=${userId}`);
 
   await coll.insertOne({
     senderId: userId,
@@ -113,6 +116,7 @@ async function saveChatHistory(userId, userMsg, assistantMsg) {
     content: assistantMsg,
     timestamp: new Date(),
   });
+  console.log(`[DEBUG] Saved assistant message. userId=${userId}`);
 }
 
 /** เก็บสถานะ aiEnabled ของแต่ละ userId (PSID) */
@@ -130,6 +134,7 @@ async function getUserStatus(userId) {
 }
 
 async function setUserStatus(userId, aiEnabled) {
+  console.log(`[DEBUG] setUserStatus: userId=${userId}, aiEnabled=${aiEnabled}`);
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("active_user_status");
@@ -143,6 +148,7 @@ async function setUserStatus(userId, aiEnabled) {
 
 /** เก็บสถานะการสั่งซื้อ (เช่น ordered, pending) ไว้ใน MongoDB */
 async function updateCustomerOrderStatus(userId, status) {
+  console.log(`[DEBUG] updateCustomerOrderStatus: userId=${userId}, status=${status}`);
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("customer_order_status");
@@ -160,6 +166,7 @@ let googleDocInstructions = "";
 
 async function fetchGoogleDocInstructions() {
   try {
+    console.log("[DEBUG] Fetching Google Doc instructions...");
     const auth = new google.auth.JWT({
       email: GOOGLE_CLIENT_EMAIL,
       key: GOOGLE_PRIVATE_KEY,
@@ -182,7 +189,7 @@ async function fetchGoogleDocInstructions() {
     });
 
     googleDocInstructions = fullText.trim();
-    console.log("Fetched Google Doc instructions OK.");
+    console.log("[DEBUG] Fetched Google Doc instructions OK.");
   } catch (err) {
     console.error("Failed to fetch systemInstructions:", err);
     googleDocInstructions = "Error fetching system instructions.";
@@ -205,6 +212,7 @@ async function getSheetsApi() {
  * *** ห้ามลบหรือแก้ไขส่วนนี้ ***
  */
 async function fetchSheetData(spreadsheetId, range) {
+  console.log(`[DEBUG] fetchSheetData: spreadsheetId=${spreadsheetId}, range=${range}`);
   try {
     const sheetsApi = await getSheetsApi();
     const response = await sheetsApi.spreadsheets.values.get({
@@ -213,6 +221,7 @@ async function fetchSheetData(spreadsheetId, range) {
     });
     const rows = response.data.values;
     if (!rows || rows.length === 0) return [];
+    console.log(`[DEBUG] Rows fetched from Sheet: ${rows.length} rows.`);
     return rows;
   } catch (err) {
     console.error("fetchSheetData error:", err);
@@ -274,6 +283,7 @@ Rules about images, privacy, etc...
 // ====================== 6) เรียก GPT (รองรับทั้งข้อความและรูป) ======================
 async function getAssistantResponse(systemInstructions, history, userContent) {
   try {
+    console.log("[DEBUG] getAssistantResponse => calling GPT...");
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
     // สร้าง messages เริ่มจาก system + ประวัติ
@@ -305,6 +315,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
       assistantReply = cutList.slice(0, 10).join("[cut]");
     }
 
+    console.log("[DEBUG] GPT responded (assistantMsg length):", assistantReply.length);
     return assistantReply.trim();
 
   } catch (error) {
@@ -316,6 +327,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
 
 // ====================== 7) ฟังก์ชันส่งข้อความกลับ Facebook ======================
 async function sendSimpleTextMessage(userId, text) {
+  console.log(`[DEBUG] Sending text message to userId=${userId}, text="${text}"`);
   const reqBody = {
     recipient: { id: userId },
     message: { text }
@@ -329,13 +341,14 @@ async function sendSimpleTextMessage(userId, text) {
 
   try {
     await requestPost(options);
-    console.log("ส่งข้อความสำเร็จ!", text);
+    console.log("[DEBUG] ส่งข้อความสำเร็จ!");
   } catch (err) {
     console.error("ไม่สามารถส่งข้อความ:", err);
   }
 }
 
 async function sendImageMessage(userId, imageUrl) {
+  console.log(`[DEBUG] Sending image to userId=${userId}, imageUrl=${imageUrl}`);
   const reqBody = {
     recipient: { id: userId },
     message: {
@@ -354,13 +367,14 @@ async function sendImageMessage(userId, imageUrl) {
 
   try {
     await requestPost(options);
-    console.log("ส่งรูปภาพสำเร็จ!", imageUrl);
+    console.log("[DEBUG] ส่งรูปภาพสำเร็จ!");
   } catch (err) {
     console.error("ไม่สามารถส่งรูปภาพ:", err);
   }
 }
 
 async function sendVideoMessage(userId, videoUrl) {
+  console.log(`[DEBUG] Sending video to userId=${userId}, videoUrl=${videoUrl}`);
   const reqBody = {
     recipient: { id: userId },
     message: {
@@ -379,7 +393,7 @@ async function sendVideoMessage(userId, videoUrl) {
 
   try {
     await requestPost(options);
-    console.log("ส่งวิดีโอสำเร็จ!", videoUrl);
+    console.log("[DEBUG] ส่งวิดีโอสำเร็จ!");
   } catch (err) {
     console.error("ไม่สามารถส่งวิดีโอ:", err);
   }
@@ -391,6 +405,8 @@ async function sendVideoMessage(userId, videoUrl) {
  * - ส่งทีละ segment (split [cut])
  */
 async function sendTextMessage(userId, response) {
+  console.log("[DEBUG] sendTextMessage => raw response:", response);
+
   response = response.replace(/\[cut\]{2,}/g, "[cut]");
   let segments = response.split("[cut]").map(s => s.trim()).filter(s => s);
   if (segments.length > 10) segments = segments.slice(0, 10);
@@ -418,6 +434,24 @@ async function sendTextMessage(userId, response) {
     if (textPart) {
       await sendSimpleTextMessage(userId, textPart);
     }
+  }
+}
+
+
+// ====================== (NEW) ฟังก์ชันไปดึงชื่อเฟซจาก Graph API ======================
+async function getFacebookUserName(userId) {
+  try {
+    const url = `https://graph.facebook.com/${userId}?fields=name&access_token=${PAGE_ACCESS_TOKEN}`;
+    console.log(`[DEBUG] getFacebookUserName => GET ${url}`);
+    const resp = await requestGet({ uri: url, json: true });
+    // resp.body => { name: "...", id: "..." }
+    if (resp.body && resp.body.name) {
+      return resp.body.name;
+    }
+    return "";
+  } catch (err) {
+    console.error("[DEBUG] getFacebookUserName error:", err);
+    return "";
   }
 }
 
@@ -460,6 +494,7 @@ async function extractOrderDataWithGPT(assistantMsg) {
 `.trim();
 
   try {
+    console.log("[DEBUG] extractOrderDataWithGPT => calling GPT to parse order data...");
     const messages = [
       { role: "system", content: sysPrompt },
       { role: "user", content: assistantMsg }
@@ -480,6 +515,7 @@ async function extractOrderDataWithGPT(assistantMsg) {
       console.error("JSON parse error, got:", gptAnswer);
       data = { is_found: false };
     }
+    console.log("[DEBUG] extractOrderDataWithGPT => parse result:", data);
     return data;
   } catch (e) {
     console.error("extractOrderDataWithGPT error:", e);
@@ -490,25 +526,30 @@ async function extractOrderDataWithGPT(assistantMsg) {
 /**
  * saveOrderToSheet:
  *  บันทึกข้อมูล order ลงชีต (ORDERS_SPREADSHEET_ID) แถวถัดไป
+ *  Columns = [Timestamp, FacebookName, CustomerName, Address, Phone, Promotion, Total, PaymentMethod]
  */
 async function saveOrderToSheet(orderData) {
   try {
+    console.log("[DEBUG] saveOrderToSheet => Start saving to Google Sheet...");
     const sheetsApi = await getSheetsApi();
 
-    // [Timestamp, ชื่อ, ที่อยู่, เบอร์, โปร, total, paymentMethod]
     const timestamp = new Date().toLocaleString("th-TH");
+    // เพิ่ม facebook_name, สมมติว่า orderData.fb_name มีค่าที่เรายิง Graph API มา
     const rowValues = [
       timestamp,
-      orderData.customer_name || "",
-      orderData.address || "",
+      orderData.fb_name || "",        // Facebook Name
+      orderData.customer_name || "",  // ชื่อ
+      orderData.address || "",        
       orderData.phone || "",
       orderData.promotion || "",
       orderData.total || "",
       orderData.payment_method || "",
     ];
 
+    console.log("[DEBUG] rowValues =", rowValues);
+
     const request = {
-      spreadsheetId: ORDERS_SPREADSHEET_ID,  // <-- ใช้ชีตอีกอันหนึ่ง (สำหรับบันทึกออเดอร์)
+      spreadsheetId: ORDERS_SPREADSHEET_ID,
       range: ORDERS_RANGE, 
       valueInputOption: "USER_ENTERED",
       insertDataOption: "INSERT_ROWS",
@@ -527,19 +568,31 @@ async function saveOrderToSheet(orderData) {
 
 /**
  * detectAndSaveOrder: 
+ * - ดึงชื่อเฟซ user
  * - เรียก extractOrderDataWithGPT เพื่อตรวจ assistantMsg
- * - ถ้า is_found = true => บันทึกลงชีต + อัปเดตสถานะ
+ * - ถ้า is_found = true => ใส่ fb_name เพิ่ม, แล้วบันทึกลงชีต + อัปเดตสถานะ
  */
 async function detectAndSaveOrder(userId, assistantMsg) {
+  console.log(`[DEBUG] detectAndSaveOrder => userId=${userId}`);
+
+  // 1) ดึงชื่อเฟซ
+  const fbName = await getFacebookUserName(userId);
+  console.log("[DEBUG] Fetched Facebook name:", fbName);
+
+  // 2) สกัดข้อมูลออเดอร์ด้วย GPT
   const parsed = await extractOrderDataWithGPT(assistantMsg);
   if (!parsed.is_found) {
-    console.log("detectAndSaveOrder: No order data found");
+    console.log("[DEBUG] detectAndSaveOrder: No order data found => skip saving");
     return;
   }
 
-  // บันทึกลงชีต
+  // 3) ใส่ fb_name ก่อนบันทึก
+  parsed.fb_name = fbName || "";
+
+  // 4) บันทึกลงชีต
   await saveOrderToSheet(parsed);
-  // อัปเดตสถานะใน Mongo
+
+  // 5) อัปเดตสถานะใน Mongo
   await updateCustomerOrderStatus(userId, "ordered");
 }
 
@@ -603,6 +656,7 @@ app.post('/webhook', async (req, res) => {
         if (webhookEvent.message && webhookEvent.message.text) {
           // 1) ข้อความ Text
           const userMsg = webhookEvent.message.text;
+          console.log(`[DEBUG] Received text from userId=${userId}:`, userMsg);
 
           // ตัวอย่างคำสั่งปิด/เปิด AI
           if (userMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
@@ -619,11 +673,12 @@ app.post('/webhook', async (req, res) => {
 
           // ถ้า AI ปิด => ไม่ตอบ
           if (!aiEnabled) {
+            console.log("[DEBUG] AI disabled => do not call GPT");
             await saveChatHistory(userId, userMsg, "");
             continue;
           }
 
-          // เรียก GPT สร้าง assistantMsg
+          // AI ตอบ
           const history = await getChatHistory(userId);
           const systemInstructions = buildSystemInstructions();
           const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
@@ -640,6 +695,8 @@ app.post('/webhook', async (req, res) => {
         } else if (webhookEvent.message && webhookEvent.message.attachments) {
           // 2) ข้อความแนบไฟล์ (image, video, ฯลฯ)
           const attachments = webhookEvent.message.attachments;
+
+          console.log("[DEBUG] Received attachments from user:", attachments);
 
           let userContentArray = [{
             type: "text",
@@ -663,8 +720,8 @@ app.post('/webhook', async (req, res) => {
             }
           }
 
-          // ถ้า AI ปิด => ไม่ตอบ
           if (!aiEnabled) {
+            console.log("[DEBUG] AI disabled => do not call GPT for attachments");
             await saveChatHistory(userId, userContentArray, "");
             continue;
           }
@@ -711,7 +768,7 @@ app.listen(PORT, async () => {
     const rows = await fetchSheetData(SPREADSHEET_ID, SHEET_RANGE);
     sheetJSON = transformSheetRowsToJSON(rows);
 
-    console.log("Startup completed. Ready to receive webhooks.");
+    console.log("[DEBUG] Startup completed. Ready to receive webhooks.");
   } catch (err) {
     console.error("Startup error:", err);
   }
