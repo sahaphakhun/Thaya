@@ -1,7 +1,8 @@
 /*******************************************************
- * ตัวอย่างโค้ด chatbot + Google Docs Instructions + 
- * Google Sheets (เดิม) สำหรับ INSTRUCTIONS + 
- * Google Sheets (ใหม่) สำหรับบันทึกออเดอร์ (เพิ่มชื่อเฟซ + debug)
+ * โค้ด chatbot + Google Docs Instructions + 
+ * Google Sheets (INSTRUCTIONS) + 
+ * Google Sheets (ใหม่) สำหรับบันทึกออเดอร์
+ * (ปรับแก้ให้สามารถปิด/เปิด AI ด้วยข้อความจากแอดมินเพจ)
  *******************************************************/
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -29,7 +30,6 @@ const MONGO_URI = process.env.MONGO_URI;
 const GOOGLE_CLIENT_EMAIL = "aitar-888@eminent-wares-446512-j8.iam.gserviceaccount.com";
 const GOOGLE_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDGhyeINArKZgaV\nitEcK+o89ilPYeRNTNZgJT7VNHB5hgNLLeAcFLJ7IlCIqTLMoJEnnoDQil6aKaz8\nExVL83uSXRrzk4zQvtt3tIP31+9wOCb9D4ZGWfVP1tD0qdD4WJ1qqg1j1/8879pH\nUeQGEMuCnyVbcQ3GbYQjyYb3wEz/Qv7kMVggF+MIaGGw2NQwM0XcufSFtyxvvX2S\nb8uGc1A8R+Dn/tmcgMODhbtEgcMg6yXI5Y26MPfDjVrEbk0lfCr7IGFJX4ASYeKl\n0jhm0RGb+aya2cb55auLN3VPO5MQ+cOp8gHBf5GiC/YgF1gbRgF5b7LgmENBxSfH\nb3WVQodLAgMBAAECggEACKB14M7LdekXZHyAQrZL0EitbzQknLv33Xyw2B3rvJ7M\nr4HM/nC4eBj7y+ciUc8GZQ+CWc2GzTHTa66+mwAia1qdYbPp3LuhGM4Leq5zn/o+\nA3rJuG6PS4qyUMy89msPXW5fSj/oE535QREiFKYP2dtlia2GI4xoag+x9uZwfMUO\nWKEe7tiUoZQEiGhwtjLq9lyST4kGGmlhNee9OyhDJcw4uCt8Cepr++hMDleWUF6c\nX0nbGmoSS0sZ5Boy8ATMhw/3luaOAlTUEz/nVDvbbWlNL9etwLKiAVw+AQXsPHNW\nNWF7gyEIsEi0qSM3PtA1X7IdReRXHqmfiZs0J3qSQQKBgQD1+Yj37Yuqj8hGi5PY\n+M0ieMdGcbUOmJsM1yUmBMV4bfaTiqm504P6DIYAqfDDWeozcHwcdpG1AfFAihEi\nh6lb0qRk8YaGbzvac8mWhwo/jDA5QB97fjFa6uwtlewZ0Er/U3QmOeVVnVC1y1b0\nrbJD5yjvI3ve+gpwAz0glpIMiwKBgQDOnpD7p7ylG4NQunqmzzdozrzZP0L6EZyE\n141st/Hsp9rtO9/ADuH6WhpirQ516l5LLv7mLPA8S9CF/cSdWF/7WlxBPjM8WRs9\nACFNBJIwUfjzPnvECmtsayzRlKuyCAspnNSkzgtdtvf2xI82Z3BGov9goZfu+D4A\n36b1qXsIQQKBgQCO1CojhO0vyjPKOuxL9hTvqmBUWFyBMD4AU8F/dQ/RYVDn1YG+\npMKi5Li/E+75EHH9EpkO0g7Do3AaQNG4UjwWVJcfAlxSHa8Mp2VsIdfilJ2/8KsX\nQ2yXVYh04/Rn/No/ro7oT4AKmcGu/nbstxuncEgFrH4WOOzspATPsn72BwKBgG5N\nBAT0NKbHm0B7bIKkWGYhB3vKY8zvnejk0WDaidHWge7nabkzuLtXYoKO9AtKxG/K\ndNUX5F+r8XO2V0HQLd0XDezecaejwgC8kwp0iD43ZHkmQBgVn+dPB6wSe94coSjj\nyjj4reSnipQ3tmRKsAtldIN3gI5YA3Gf85dtlHqBAoGAD5ePt7cmu3tDZhA3A8f9\no8mNPvqz/WGs7H2Qgjyfc3jUxEGhVt1Su7J1j+TppfkKtJIDKji6rVA9oIjZtpZT\ngxnU6hcYuiwbLh3wGEFIjP1XeYYILudqfWOEbwnxD1RgMkCqfSHf/niWlfiH6p3F\ndnBsLY/qXdKfS/OXyezAm4M=\n-----END PRIVATE KEY-----\n";
 
-
 // ------------------- (A) Google Docs -------------------
 const GOOGLE_DOC_ID = "1IDvCXWa_5QllMTKrVSvhLRQPNNGkYgxb8byaDGGEhyU";
 
@@ -39,8 +39,8 @@ const SPREADSHEET_ID = "1esN_P6JuPzYUGesR60zVuIGeuvSnRM1hlyaxCJbhI_c";
 const SHEET_RANGE = "ชีต1!A2:B28";  // Range สำหรับดึงข้อมูล instructions
 
 // ------------------- (C) Google Sheet สำหรับ "บันทึกออเดอร์" (ใหม่) -------------------
-const ORDERS_SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
 // เพิ่มคอลัมน์เป็น 8 คอลัมน์ (A2:H2) => [timestamp, facebookName, customerName, address, phone, promo, total, payment]
+const ORDERS_SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
 const SHEET_NAME_FOR_ORDERS = "บันทึกออเดอร์";
 const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:H`; // เริ่มเก็บที่แถว 2, คอลัมน์ A-H
 
@@ -461,7 +461,6 @@ async function getFacebookUserName(userId) {
 /**
  * extractOrderDataWithGPT:
  * ใช้ GPT ช่วยสแกน assistantMsg เพื่อดึงข้อมูล (ชื่อ, ที่อยู่, เบอร์, โปร, total, paymentMethod ฯลฯ)
- * อาจไม่ต้องมีคำว่า "สรุปยอด" ก็ได้
  */
 async function extractOrderDataWithGPT(assistantMsg) {
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -534,7 +533,6 @@ async function saveOrderToSheet(orderData) {
     const sheetsApi = await getSheetsApi();
 
     const timestamp = new Date().toLocaleString("th-TH");
-    // เพิ่ม facebook_name, สมมติว่า orderData.fb_name มีค่าที่เรายิง Graph API มา
     const rowValues = [
       timestamp,
       orderData.fb_name || "",        // Facebook Name
@@ -620,15 +618,13 @@ app.post('/webhook', async (req, res) => {
         continue;
       }
 
+      // เก็บ pageId ไว้ (sender ของบาง event)
+      const pageId = entry.id; 
+
       for (const webhookEvent of entry.messaging) {
-        // ข้าม event ที่ไม่ใช่ข้อความปกติ
-        if (
-          webhookEvent.message?.is_echo ||
-          webhookEvent.delivery ||
-          webhookEvent.read ||
-          webhookEvent.message?.app_id
-        ) {
-          console.log("Skipping echo/delivery/read/app_id event");
+        // ข้าม event ที่เป็น delivery/read/app_id
+        if (webhookEvent.delivery || webhookEvent.read || webhookEvent.message?.app_id) {
+          console.log("Skipping delivery/read/app_id event");
           continue;
         }
 
@@ -643,103 +639,135 @@ app.post('/webhook', async (req, res) => {
           }
         }
 
-        // หา userId
-        const pageId = entry.id; 
+        // ---------------------------
+        // 1) ระบุ userId จาก event
+        // ถ้า sender คือเพจ => แปลว่าเพจเป็นคนส่ง => userId = recipient.id
+        // ถ้า sender คือ user => userId = sender.id
+        // ---------------------------
         let userId = (webhookEvent.sender.id === pageId)
           ? webhookEvent.recipient.id
           : webhookEvent.sender.id;
 
-        // เช็คสถานะ aiEnabled
-        const userStatus = await getUserStatus(userId);
-        const aiEnabled = userStatus.aiEnabled;
-
-        if (webhookEvent.message && webhookEvent.message.text) {
-          // 1) ข้อความ Text
-          const userMsg = webhookEvent.message.text;
-          console.log(`[DEBUG] Received text from userId=${userId}:`, userMsg);
-
-          // ตัวอย่างคำสั่งปิด/เปิด AI
-          if (userMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
-            await setUserStatus(userId, false);
-            await sendSimpleTextMessage(userId, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ");
-            await saveChatHistory(userId, userMsg, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ");
-            continue;
-          } else if (userMsg === "แอดมิน THAYA ยินดีดูแลลูกค้าค่ะ") {
-            await setUserStatus(userId, true);
-            await sendSimpleTextMessage(userId, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ");
-            await saveChatHistory(userId, userMsg, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ");
-            continue;
-          }
-
-          // ถ้า AI ปิด => ไม่ตอบ
-          if (!aiEnabled) {
-            console.log("[DEBUG] AI disabled => do not call GPT");
-            await saveChatHistory(userId, userMsg, "");
-            continue;
-          }
-
-          // AI ตอบ
-          const history = await getChatHistory(userId);
-          const systemInstructions = buildSystemInstructions();
-          const assistantMsg = await getAssistantResponse(systemInstructions, history, userMsg);
-
-          // บันทึกลง DB
-          await saveChatHistory(userId, userMsg, assistantMsg);
-
-          // ตรวจ assistantMsg มีข้อมูลออเดอร์หรือไม่
-          await detectAndSaveOrder(userId, assistantMsg);
-
-          // ส่งข้อความกลับ
-          await sendTextMessage(userId, assistantMsg);
-
-        } else if (webhookEvent.message && webhookEvent.message.attachments) {
-          // 2) ข้อความแนบไฟล์ (image, video, ฯลฯ)
+        // ---------------------------
+        // 2) เช็คว่ามี message => text หรือ attachments
+        // ---------------------------
+        if (webhookEvent.message) {
+          const textMsg = webhookEvent.message.text || "";
+          const isEcho = webhookEvent.message.is_echo === true;
           const attachments = webhookEvent.message.attachments;
 
-          console.log("[DEBUG] Received attachments from user:", attachments);
+          // ---------------------------
+          // (A) ถ้าเป็น Echo จากแอดมินเพจ
+          //     เช็คเฉพาะ keyphrase เปิด/ปิด AI
+          // ---------------------------
+          if (isEcho) {
+            if (textMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
+              // ปิด AI
+              await setUserStatus(userId, false);
+              console.log(`[DEBUG] (Admin Echo) Disabled AI for userId=${userId}`);
 
-          let userContentArray = [{
-            type: "text",
-            text: "ผู้ใช้ส่งไฟล์แนบ"
-          }];
+              // จะบันทึกลงประวัติหรือไม่ก็ได้
+              await saveChatHistory(userId, textMsg, "(Admin toggled off AI)");
+              continue;
+            } 
+            else if (textMsg === "แอดมิน THAYA ยินดีดูแลลูกค้าค่ะ") {
+              // เปิด AI
+              await setUserStatus(userId, true);
+              console.log(`[DEBUG] (Admin Echo) Enabled AI for userId=${userId}`);
 
-          for (const att of attachments) {
-            if (att.type === 'image') {
-              userContentArray.push({
-                type: "image_url",
-                image_url: {
-                  url: att.payload.url,
-                  detail: "auto"
-                }
-              });
-            } else {
-              userContentArray.push({
-                type: "text",
-                text: `ไฟล์แนบประเภท: ${att.type}`
-              });
+              // บันทึกลงประวัติ
+              await saveChatHistory(userId, textMsg, "(Admin toggled on AI)");
+              continue;
+            } 
+            else {
+              // echo อื่น ๆ => skip
+              console.log("Skipping other echo");
+              continue;
             }
           }
 
-          if (!aiEnabled) {
-            console.log("[DEBUG] AI disabled => do not call GPT for attachments");
-            await saveChatHistory(userId, userContentArray, "");
-            continue;
+          // ---------------------------
+          // (B) ถ้าไม่ใช่ Echo => คือข้อความจาก “ลูกค้า”
+          // ---------------------------
+          // ดึง status aiEnabled
+          const userStatus = await getUserStatus(userId);
+          const aiEnabled = userStatus.aiEnabled;
+
+          if (textMsg && !attachments) {
+            // ข้อความ Text จากลูกค้า
+            console.log(`[DEBUG] Received text from userId=${userId}:`, textMsg);
+
+            // ถ้า AI ปิด => บันทึกเฉยๆ
+            if (!aiEnabled) {
+              await saveChatHistory(userId, textMsg, "");
+              continue;
+            }
+
+            // AI เปิด => เรียก GPT
+            const history = await getChatHistory(userId);
+            const systemInstructions = buildSystemInstructions();
+            const assistantMsg = await getAssistantResponse(systemInstructions, history, textMsg);
+
+            // บันทึกลง DB
+            await saveChatHistory(userId, textMsg, assistantMsg);
+
+            // ตรวจ assistantMsg มีข้อมูลออเดอร์หรือไม่
+            await detectAndSaveOrder(userId, assistantMsg);
+
+            // ส่งข้อความกลับ
+            await sendTextMessage(userId, assistantMsg);
+
+          } else if (attachments && attachments.length > 0) {
+            // ข้อความแนบไฟล์ (image, video, etc.)
+            console.log("[DEBUG] Received attachments from user:", attachments);
+
+            // เตรียม array สำหรับเป็น userContent ส่งให้ GPT
+            let userContentArray = [{
+              type: "text",
+              text: "ผู้ใช้ส่งไฟล์แนบ"
+            }];
+
+            for (const att of attachments) {
+              if (att.type === 'image') {
+                userContentArray.push({
+                  type: "image_url",
+                  image_url: {
+                    url: att.payload.url,
+                    detail: "auto"
+                  }
+                });
+              } else {
+                userContentArray.push({
+                  type: "text",
+                  text: `ไฟล์แนบประเภท: ${att.type}`
+                });
+              }
+            }
+
+            // ถ้า AI ปิด => บันทึกประวัติแล้วไม่เรียก GPT
+            if (!aiEnabled) {
+              await saveChatHistory(userId, userContentArray, "");
+              continue;
+            }
+
+            // AI เปิด => เรียก GPT
+            const history = await getChatHistory(userId);
+            const systemInstructions = buildSystemInstructions();
+            const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
+
+            // บันทึก
+            await saveChatHistory(userId, userContentArray, assistantMsg);
+
+            // ตรวจ assistantMsg ว่ามีข้อมูลออเดอร์ไหม
+            await detectAndSaveOrder(userId, assistantMsg);
+
+            // ส่งข้อความ
+            await sendTextMessage(userId, assistantMsg);
+
+          } else {
+            // ไม่มีข้อความ text และไม่มีไฟล์แนบ
+            console.log(">> [Webhook] Received empty message:", webhookEvent);
           }
-
-          // AI ตอบ
-          const history = await getChatHistory(userId);
-          const systemInstructions = buildSystemInstructions();
-          const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
-
-          // บันทึก
-          await saveChatHistory(userId, userContentArray, assistantMsg);
-
-          // ตรวจ assistantMsg ว่ามีข้อมูลออเดอร์ไหม
-          await detectAndSaveOrder(userId, assistantMsg);
-
-          // ส่งข้อความ
-          await sendTextMessage(userId, assistantMsg);
-
         } else {
           console.log(">> [Webhook] Received event but not text/attachment:", webhookEvent);
         }
@@ -751,7 +779,6 @@ app.post('/webhook', async (req, res) => {
     res.sendStatus(404);
   }
 });
-
 
 // ====================== Start Server ======================
 app.listen(PORT, async () => {
