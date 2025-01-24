@@ -457,11 +457,6 @@ async function getFacebookUserName(userId) {
 
 
 // ====================== 8) ฟังก์ชันตรวจจับและบันทึกออเดอร์จาก Assistant ======================
-
-/**
- * extractOrderDataWithGPT:
- * ใช้ GPT ช่วยสแกน assistantMsg เพื่อดึงข้อมูล (ชื่อ, ที่อยู่, เบอร์, โปร, total, paymentMethod ฯลฯ)
- */
 async function extractOrderDataWithGPT(assistantMsg) {
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
@@ -522,11 +517,6 @@ async function extractOrderDataWithGPT(assistantMsg) {
   }
 }
 
-/**
- * saveOrderToSheet:
- *  บันทึกข้อมูล order ลงชีต (ORDERS_SPREADSHEET_ID) แถวถัดไป
- *  Columns = [Timestamp, FacebookName, CustomerName, Address, Phone, Promotion, Total, PaymentMethod]
- */
 async function saveOrderToSheet(orderData) {
   try {
     console.log("[DEBUG] saveOrderToSheet => Start saving to Google Sheet...");
@@ -535,8 +525,8 @@ async function saveOrderToSheet(orderData) {
     const timestamp = new Date().toLocaleString("th-TH");
     const rowValues = [
       timestamp,
-      orderData.fb_name || "",        // Facebook Name
-      orderData.customer_name || "",  // ชื่อ
+      orderData.fb_name || "",        
+      orderData.customer_name || "",  
       orderData.address || "",        
       orderData.phone || "",
       orderData.promotion || "",
@@ -564,12 +554,6 @@ async function saveOrderToSheet(orderData) {
   }
 }
 
-/**
- * detectAndSaveOrder: 
- * - ดึงชื่อเฟซ user
- * - เรียก extractOrderDataWithGPT เพื่อตรวจ assistantMsg
- * - ถ้า is_found = true => ใส่ fb_name เพิ่ม, แล้วบันทึกลงชีต + อัปเดตสถานะ
- */
 async function detectAndSaveOrder(userId, assistantMsg) {
   console.log(`[DEBUG] detectAndSaveOrder => userId=${userId}`);
 
@@ -622,9 +606,12 @@ app.post('/webhook', async (req, res) => {
       const pageId = entry.id; 
 
       for (const webhookEvent of entry.messaging) {
-        // ข้าม event ที่เป็น delivery/read/app_id
-        if (webhookEvent.delivery || webhookEvent.read || webhookEvent.message?.app_id) {
-          console.log("Skipping delivery/read/app_id event");
+        // --------------------------------------------------------
+        // แก้ไขเฉพาะตรงนี้: ข้ามเฉพาะ delivery / read
+        // (ลบ webhookEvent.message?.app_id ออกจากเงื่อนไข)
+        // --------------------------------------------------------
+        if (webhookEvent.delivery || webhookEvent.read) {
+          console.log("Skipping delivery/read event");
           continue;
         }
 
