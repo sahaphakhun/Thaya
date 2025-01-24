@@ -300,7 +300,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
-      temperature: 0.1,
+      temperature: 0.2,
     });
 
     let assistantReply = response.choices[0].message.content;
