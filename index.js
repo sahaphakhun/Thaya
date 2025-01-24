@@ -662,6 +662,7 @@ app.post('/webhook', async (req, res) => {
           // ---------------------------
           if (isEcho) {
             if (textMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
+              console.log(`[DEBUG] is_echo event from admin: text="${textMsg}" (userId=${userId})`);
               // ปิด AI
               await setUserStatus(userId, false);
               console.log(`[DEBUG] (Admin Echo) Disabled AI for userId=${userId}`);
