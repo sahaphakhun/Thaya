@@ -28,7 +28,7 @@ const MONGO_URI = process.env.MONGO_URI;
 
 // หากมีการเชื่อมต่อ Google Docs, Sheets
 const GOOGLE_CLIENT_EMAIL = "aitar-888@eminent-wares-446512-j8.iam.gserviceaccount.com";
-const GOOGLE_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDGhyeINArKZgaV\nitEcK+o89ilPYeRNTNZgJT7VNHB5hgNLLeAcFLJ7IlCIqTLMoJEnnoDQil6aKaz8\nExVL83uSXRrzk4zQvtt3tIP31+9wOCb9D4ZGWfVP1tD0qdD4WJ1qqg1j1/8879pH\nUeQGEMuCnyVbcQ3GbYQjyYb3wEz/Qv7kMVggF+MIaGGw2NQwM0XcufSFtyxvvX2S\nb8uGc1A8R+Dn/tmcgMODhbtEgcMg6yXI5Y26MPfDjVrEbk0lfCr7IGFJX4ASYeKl\n0jhm0RGb+aya2cb55auLN3VPO5MQ+cOp8gHBf5GiC/YgF1gbRgF5b7LgmENBxSfH\nb3WVQodLAgMBAAECggEACKB14M7LdekXZHyAQrZL0EitbzQknLv33Xyw2B3rvJ7M\nr4HM/nC4eBj7y+ciUc8GZQ+CWc2GzTHTa66+mwAia1qdYbPp3LuhGM4Leq5zn/o+\nA3rJuG6PS4qyUMy89msPXW5fSj/oE535QREiFKYP2dtlia2GI4xoag+x9uZwfMUO\nWKEe7tiUoZQEiGhwtjLq9lyST4kGGmlhNee9OyhDJcw4uCt8Cepr++hMDleWUF6c\nX0nbGmoSS0sZ5Boy8ATMhw/3luaOAlTUEz/nVDvbbWlNL9etwLKiAVw+AQXsPHNW\nNWF7gyEIsEi0qSM3PtA1X7IdReRXHqmfiZs0J3qSQQKBgQD1+Yj37Yuqj8hGi5PY\n+M0ieMdGcbUOmJsM1yUmBMV4bfaTiqm504P6DIYAqfDDWeozcHwcdpG1AfFAihEi\nh6lb0qRk8YaGbzvac8mWhwo/jDA5QB97fjFa6uwtlewZ0Er/U3QmOeVVnVC1y1b0\nrbJD5yjvI3ve+gpwAz0glpIMiwKBgQDOnpD7p7ylG4NQunqmzzdozrzZP0L6EZyE\n141st/Hsp9rtO9/ADuH6WhpirQ516l5LLv7mLPA8S9CF/cSdWF/7WlxBPjM8WRs9\nACFNBJIwUfjzPnvECmtsayzRlKuyCAspnNSkzgtdtvf2xI82Z3BGov9goZfu+D4A\n36b1qXsIQQKBgQCO1CojhO0vyjPKOuxL9hTvqmBUWFyBMD4AU8F/dQ/RYVDn1YG+\npMKi5Li/E+75EHH9EpkO0g7Do3AaQNG4UjwWVJcfAlxSHa8Mp2VsIdfilJ2/8KsX\nQ2yXVYh04/Rn/No/ro7oT4AKmcGu/nbstxuncEgFrH4WOOzspATPsn72BwKBgG5N\nBAT0NKbHm0B7bIKkWGYhB3vKY8zvnejk0WDaidHWge7nabkzuLtXYoKO9AtKxG/K\ndNUX5F+r8XO2V0HQLd0XDezecaejwgC8kwp0iD43ZHkmQBgVn+dPB6wSe94coSjj\nyjj4reSnipQ3tmRKsAtldIN3gI5YA3Gf85dtlHqBAoGAD5ePt7cmu3tDZhA3A8f9\no8mNPvqz/WGs7H2Qgjyfc3jUxEGhVt1Su7J1j+TppfkKtJIDKji6rVA9oIjZtpZT\ngxnU6hcYuiwbLh3wGEFIjP1XeYYILudqfWOEbwnxD1RgMkCqfSHf/niWlfiH6p3F\ndnBsLY/qXdKfS/OXyezAm4M=\n-----END PRIVATE KEY-----\n";
+const GOOGLE_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhki...\n-----END PRIVATE KEY-----\n";
 
 // ------------------- (A) Google Docs -------------------
 const GOOGLE_DOC_ID = "1IDvCXWa_5QllMTKrVSvhLRQPNNGkYgxb8byaDGGEhyU";
@@ -412,6 +412,9 @@ async function sendTextMessage(userId, response) {
   if (segments.length > 10) segments = segments.slice(0, 10);
 
   for (let segment of segments) {
+    // ------------------------
+    // ดัก [SEND_IMAGE:URL] และ [SEND_VIDEO:URL]
+    // ------------------------
     const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
     const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
 
@@ -423,14 +426,19 @@ async function sendTextMessage(userId, response) {
       .replace(videoRegex, '')
       .trim();
 
+    // ส่งรูป (ถ้ามี)
     for (const match of images) {
       const imageUrl = match[1];
       await sendImageMessage(userId, imageUrl);
     }
+
+    // ส่งวิดีโอ (ถ้ามี)
     for (const match of videos) {
       const videoUrl = match[1];
       await sendVideoMessage(userId, videoUrl);
     }
+
+    // ส่ง text ส่วนที่เหลือ (ถ้ามี)
     if (textPart) {
       await sendSimpleTextMessage(userId, textPart);
     }
@@ -607,8 +615,7 @@ app.post('/webhook', async (req, res) => {
 
       for (const webhookEvent of entry.messaging) {
         // --------------------------------------------------------
-        // แก้ไขเฉพาะตรงนี้: ข้ามเฉพาะ delivery / read
-        // (ลบ webhookEvent.message?.app_id ออกจากเงื่อนไข)
+        // ข้ามเฉพาะ delivery / read events
         // --------------------------------------------------------
         if (webhookEvent.delivery || webhookEvent.read) {
           console.log("Skipping delivery/read event");
@@ -628,8 +635,6 @@ app.post('/webhook', async (req, res) => {
 
         // ---------------------------
         // 1) ระบุ userId จาก event
-        // ถ้า sender คือเพจ => แปลว่าเพจเป็นคนส่ง => userId = recipient.id
-        // ถ้า sender คือ user => userId = sender.id
         // ---------------------------
         let userId = (webhookEvent.sender.id === pageId)
           ? webhookEvent.recipient.id
@@ -649,21 +654,14 @@ app.post('/webhook', async (req, res) => {
           // ---------------------------
           if (isEcho) {
             if (textMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
-              console.log(`[DEBUG] is_echo event from admin: text="${textMsg}" (userId=${userId})`);
               // ปิด AI
               await setUserStatus(userId, false);
-              console.log(`[DEBUG] (Admin Echo) Disabled AI for userId=${userId}`);
-
-              // จะบันทึกลงประวัติหรือไม่ก็ได้
               await saveChatHistory(userId, textMsg, "(Admin toggled off AI)");
               continue;
             } 
             else if (textMsg === "แอดมิน THAYA ยินดีดูแลลูกค้าค่ะ") {
               // เปิด AI
               await setUserStatus(userId, true);
-              console.log(`[DEBUG] (Admin Echo) Enabled AI for userId=${userId}`);
-
-              // บันทึกลงประวัติ
               await saveChatHistory(userId, textMsg, "(Admin toggled on AI)");
               continue;
             } 
@@ -677,7 +675,6 @@ app.post('/webhook', async (req, res) => {
           // ---------------------------
           // (B) ถ้าไม่ใช่ Echo => คือข้อความจาก “ลูกค้า”
           // ---------------------------
-          // ดึง status aiEnabled
           const userStatus = await getUserStatus(userId);
           const aiEnabled = userStatus.aiEnabled;
 
