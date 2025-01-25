@@ -657,12 +657,14 @@ app.post('/webhook', async (req, res) => {
               // ปิด AI
               await setUserStatus(userId, false);
               await saveChatHistory(userId, textMsg, "(Admin toggled off AI)");
+              await sendSimpleTextMessage(userId, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ");
               continue;
             } 
             else if (textMsg === "แอดมิน THAYA ยินดีดูแลลูกค้าค่ะ") {
               // เปิด AI
               await setUserStatus(userId, true);
               await saveChatHistory(userId, textMsg, "(Admin toggled on AI)");
+              await sendSimpleTextMessage(userId, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ");
               continue;
             } 
             else {
