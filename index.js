@@ -536,7 +536,7 @@ async function extractOrderDataWithGPT(assistantMsg) {
 - "customer_name"
 - "address"
 - "phone"
-- "promotion"
+- "promotion" (โปร 1 แถม 1, โปร 2 แถม 3, โปร 3 แถม 5, โปร 5 แถม 9)
 - "total"
 - "payment_method" (ถ้าไม่มี ให้ใส่ "เก็บเงินปลายทาง")
 - "note" (หากเจอคำขอแก้ที่อยู่หรือขอเปลี่ยนโปร ให้สรุปเป็นหมายเหตุ)
