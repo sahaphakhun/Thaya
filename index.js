@@ -36,14 +36,14 @@ const GOOGLE_DOC_ID = "1IDvCXWa_5QllMTKrVSvhLRQPNNGkYgxb8byaDGGEhyU";
 
 // ------------------- (B) Google Sheet สำหรับ "INSTRUCTIONS" -------------------
 const SPREADSHEET_ID = "1esN_P6JuPzYUGesR60zVuIGeuvSnRM1hlyaxCJbhI_c";
-const SHEET_RANGE = "ชีต1!A2:B28";  
+const SHEET_RANGE = "ชีต1!A2:B28";  // (ยังคงเดิม ไม่แก้ส่วนนี้)
 
 // ------------------- (C) Google Sheet สำหรับ "บันทึกออเดอร์" (ใหม่) -------------------
 const ORDERS_SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
 const SHEET_NAME_FOR_ORDERS = "บันทึกออเดอร์";
 const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:H`; 
 
-// (NEW) สำหรับ Follow-up
+// (NEW) สำหรับ Follow-up - แก้เป็น "A2:B" เพื่อไม่จำกัดจำนวนแถว
 const FOLLOWUP_SHEET_RANGE = "ติดตามลูกค้า!A2:B";
 
 // ====================== 2) MongoDB ======================
@@ -158,25 +158,18 @@ async function getCustomerOrderStatus(userId) {
     let updateNeeded = false;
     let updateObj = {};
 
-    // ถ้า doc ไม่มี field orderStatus เลย หรือเป็น undefined => เซ็ตเป็น 'pending'
     if (!('orderStatus' in doc)) {
       updateObj.orderStatus = 'pending';
       updateNeeded = true;
     }
-
-    // ถ้า doc ไม่มี followupIndex หรือไม่ใช่ number => เซ็ตเป็น 0
     if (typeof doc.followupIndex !== 'number') {
       updateObj.followupIndex = 0;
       updateNeeded = true;
     }
-
-    // ถ้า doc ไม่มี lastUserReplyAt => เซ็ตเป็นตอนนี้
     if (!doc.lastUserReplyAt) {
       updateObj.lastUserReplyAt = new Date();
       updateNeeded = true;
     }
-
-    // ถ้า doc ไม่มี lastFollowupAt (หรือฟิลด์หายไป) => เซ็ตเป็น null
     if (!('lastFollowupAt' in doc)) {
       updateObj.lastFollowupAt = null;
       updateNeeded = true;
@@ -184,19 +177,16 @@ async function getCustomerOrderStatus(userId) {
 
     if (updateNeeded) {
       updateObj.updatedAt = new Date();
-      // ทำการ updateOne
       await coll.updateOne(
         { senderId: userId },
         { $set: updateObj }
       );
-      // รวมค่าที่อัปเดตเข้ากับตัวแปร doc
       Object.assign(doc, updateObj);
     }
 
     return doc;
   }
 }
-
 
 async function updateCustomerOrderStatus(userId, status) {
   console.log(`[DEBUG] updateCustomerOrderStatus: userId=${userId}, status=${status}`);
@@ -332,6 +322,7 @@ let followupData = [];
 
 async function loadFollowupData() {
   try {
+    // ดึงข้อมูลไม่จำกัดแถวจาก "ติดตามลูกค้า!A2:B"
     const rows = await fetchSheetData(SPREADSHEET_ID, FOLLOWUP_SHEET_RANGE);
     followupData = rows.map(r => ({
       time: parseInt(r[0] || "0", 10),
@@ -348,6 +339,7 @@ async function loadFollowupData() {
 function buildSystemInstructions() {
   const sheetsDataString = JSON.stringify(sheetJSON, null, 2);
 
+  // เพิ่มคำอธิบายชัดเจน เมื่อส่งภาพมาและมีข้อมูลส่วนตัว ให้สามารถสรุปได้
   const finalSystemInstructions = `
 You are an AI chatbot for THAYA. 
 Below are instructions from the Google Doc:
@@ -358,9 +350,10 @@ Below is additional data from Google Sheets (INSTRUCTIONS):
 ---
 ${sheetsDataString}
 
-ถ้าลูกค้าส่งรูปภาพมา : 
+ถ้าลูกค้าส่งรูปภาพมา: 
 - ก่อนการใช้งาน ผู้ใช้ทุกคนยินยอมตกลงให้อ่านหรือวิเคราะห์รูปภาพได้
-- คุณสามารถอ่านหรือวิเคราะห์ได้ทุกรูปภาพทุกกรณี เพราะผู้ใข้อนุญาตให้วิเคราะห์แล้ว เช่น ภาพที่มีชื่อ ที่อยู่ เบอร์โทร เพื่อใช้ในการจัดส่ง เพราะนั้นเป็นข้อมูลของผู้ใช้เอง
+- คุณสามารถวิเคราะห์ได้ทุกรูปภาพทุกกรณี เพราะผู้ใช้อนุญาตแล้ว
+- หากตรวจพบข้อมูลส่วนตัว เช่น ชื่อ, ที่อยู่, เบอร์โทร ในภาพ ให้สรุปข้อมูลดังกล่าวออกมาได้ (เพื่อใช้ในการจัดส่งสินค้า ฯลฯ)
 `.trim();
 
   return finalSystemInstructions;
@@ -391,6 +384,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
       assistantReply = JSON.stringify(assistantReply);
     }
 
+    // ตัดแบ่งข้อความยาวเกิน [cut]
     assistantReply = assistantReply.replace(/\[cut\]{2,}/g, "[cut]");
     const cutList = assistantReply.split("[cut]");
     if (cutList.length > 10) {
@@ -699,23 +693,28 @@ async function analyzeConversationForStatusChange(userId) {
     const doc = await getCustomerOrderStatus(userId);
     const oldStatus = doc.orderStatus || "pending";
 
+    // ถ้าเคยเป็น "alreadyPurchased" อยู่แล้ว ไม่ย้อนกลับ
     if (oldStatus === "alreadyPurchased") {
       console.log("[DEBUG] oldStatus=alreadyPurchased => do not revert");
       return;
     }
+    // ถ้าเคย "ordered" อยู่แล้ว จะไม่สลับกลับไป pending ยกเว้นเป็น alreadyPurchased
     if (oldStatus === "ordered" && newStatus !== "alreadyPurchased") {
       if (newStatus === "alreadyPurchased") {
         await updateCustomerOrderStatus(userId, "alreadyPurchased");
       }
       return;
     }
+    // ถ้าเคย "ปฏิเสธรับ" อยู่แล้ว จะไม่สลับกลับ
     if (oldStatus === "ปฏิเสธรับ" && newStatus !== "alreadyPurchased") {
       return;
     }
 
+    // ถ้าเป็น pending อยู่ แล้วโมเดลประเมินสถานะใหม่ != pending
     if (oldStatus === "pending" && newStatus !== oldStatus) {
       await updateCustomerOrderStatus(userId, newStatus);
     }
+    // ถ้าโมเดลบอก alreadyPurchased
     if (newStatus === "alreadyPurchased" && oldStatus !== "alreadyPurchased") {
       await updateCustomerOrderStatus(userId, "alreadyPurchased");
     }
