@@ -132,6 +132,9 @@ async function setUserStatus(userId, aiEnabled) {
   );
 }
 
+/*******************************************************
+ * ตัวอย่างฟังก์ชัน getCustomerOrderStatus แก้ไขให้บันทึก field ได้แน่นอน
+ *******************************************************/
 async function getCustomerOrderStatus(userId) {
   const client = await connectDB();
   const db = client.db("chatbot");
@@ -139,18 +142,61 @@ async function getCustomerOrderStatus(userId) {
 
   let doc = await coll.findOne({ senderId: userId });
   if (!doc) {
+    // *ไม่เคยมี doc นี้ => สร้างใหม่*
     doc = {
       senderId: userId,
-      orderStatus: "pending",
-      followupIndex: 0,
-      lastUserReplyAt: new Date(),
+      orderStatus: "pending",       // <--- กำหนดค่าเริ่มต้น
+      followupIndex: 0,            // <--- กำหนดค่าเริ่มต้น
+      lastUserReplyAt: new Date(), // <--- กำหนดค่าเริ่มต้น
       lastFollowupAt: null,
       updatedAt: new Date()
     };
     await coll.insertOne(doc);
+    return doc;
+  } else {
+    // *มี doc แล้ว แต่บางทีขาด field ที่เราต้องการ => อัปเดตใส่ให้*
+    let updateNeeded = false;
+    let updateObj = {};
+
+    // ถ้า doc ไม่มี field orderStatus เลย หรือเป็น undefined => เซ็ตเป็น 'pending'
+    if (!('orderStatus' in doc)) {
+      updateObj.orderStatus = 'pending';
+      updateNeeded = true;
+    }
+
+    // ถ้า doc ไม่มี followupIndex หรือไม่ใช่ number => เซ็ตเป็น 0
+    if (typeof doc.followupIndex !== 'number') {
+      updateObj.followupIndex = 0;
+      updateNeeded = true;
+    }
+
+    // ถ้า doc ไม่มี lastUserReplyAt => เซ็ตเป็นตอนนี้
+    if (!doc.lastUserReplyAt) {
+      updateObj.lastUserReplyAt = new Date();
+      updateNeeded = true;
+    }
+
+    // ถ้า doc ไม่มี lastFollowupAt (หรือฟิลด์หายไป) => เซ็ตเป็น null
+    if (!('lastFollowupAt' in doc)) {
+      updateObj.lastFollowupAt = null;
+      updateNeeded = true;
+    }
+
+    if (updateNeeded) {
+      updateObj.updatedAt = new Date();
+      // ทำการ updateOne
+      await coll.updateOne(
+        { senderId: userId },
+        { $set: updateObj }
+      );
+      // รวมค่าที่อัปเดตเข้ากับตัวแปร doc
+      Object.assign(doc, updateObj);
+    }
+
+    return doc;
   }
-  return doc;
 }
+
 
 async function updateCustomerOrderStatus(userId, status) {
   console.log(`[DEBUG] updateCustomerOrderStatus: userId=${userId}, status=${status}`);
