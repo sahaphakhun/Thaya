@@ -539,7 +539,7 @@ async function extractOrderDataWithGPT(assistantMsg) {
 - "promotion" (โปร 1 แถม 1, โปร 2 แถม 3, โปร 3 แถม 5, โปร 5 แถม 9)
 - "total"
 - "payment_method" (ถ้าไม่มี ให้ใส่ "เก็บเงินปลายทาง")
-- "note" (หากเจอคำขอแก้ที่อยู่หรือขอเปลี่ยนโปร ให้สรุปเป็นหมายเหตุ)
+- "note" (หากเจอคำขอแก้ที่อยู่หรือขอเปลี่ยนโปร ให้ใส่ลงไป เช่น "ลูกค้าขอแก้ที่อยู่", "ลูกค้าต้องการเปลี่ยนโปร")
 
 ตอบเป็น JSON เท่านั้น
 โครงสร้าง:
@@ -891,6 +891,7 @@ app.post('/webhook', async (req, res) => {
           } else if (attachments && attachments.length > 0) {
             console.log("[DEBUG] Received attachments from user:", attachments);
 
+            // ==== ส่วนแก้ไข: จัดการ attachments แบบโค้ดที่สอง ====
             let userContentArray = [{
               type: "text",
               text: "ผู้ใช้ส่งไฟล์แนบ"
@@ -901,7 +902,9 @@ app.post('/webhook', async (req, res) => {
                 userContentArray.push({
                   type: "image_url",
                   image_url: {
-                    url: att.payload.url
+                    url: att.payload.url,
+                    // ใส่ detail ได้ตามต้องการ
+                    detail: "auto"  
                   }
                 });
               } else if (att.type === 'video') {
@@ -918,6 +921,7 @@ app.post('/webhook', async (req, res) => {
                 });
               }
             }
+            // ==== จบส่วนแก้ไข attachments ====
 
             await saveChatHistory(userId, userContentArray, "user");
 
