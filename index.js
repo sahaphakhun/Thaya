@@ -41,7 +41,7 @@ const SHEET_RANGE = "ชีต1!A2:B28";  // (ยังคงเดิม ไม
 // ------------------- (C) Google Sheet สำหรับ "บันทึกออเดอร์" (ใหม่) -------------------
 const ORDERS_SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
 const SHEET_NAME_FOR_ORDERS = "บันทึกออเดอร์";
-const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:H`; 
+const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:I`; 
 
 // (NEW) สำหรับ Follow-up - แก้เป็น "A2:B" เพื่อไม่จำกัดจำนวนแถว
 const FOLLOWUP_SHEET_RANGE = "ติดตามลูกค้า!A2:B";
@@ -529,6 +529,7 @@ async function getFacebookUserName(userId) {
 async function extractOrderDataWithGPT(assistantMsg) {
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+  // เพิ่ม note ลงไปในโครงสร้าง JSON ด้วย
   const sysPrompt = `
 คุณเป็นโปรแกรมตรวจสอบว่าข้อความ AssistantMsg มีข้อมูลออเดอร์/ที่อยู่หรือไม่
 ถ้ามี ให้ดึง:
@@ -537,7 +538,8 @@ async function extractOrderDataWithGPT(assistantMsg) {
 - "phone"
 - "promotion"
 - "total"
-- "payment_method" (ถ้ามี)
+- "payment_method" (ถ้าไม่มี ให้ใส่ "เก็บเงินปลายทาง")
+- "note" (หากเจอคำขอแก้ที่อยู่หรือขอเปลี่ยนโปร ให้สรุปเป็นหมายเหตุ)
 
 ตอบเป็น JSON เท่านั้น
 โครงสร้าง:
@@ -548,12 +550,15 @@ async function extractOrderDataWithGPT(assistantMsg) {
   "phone": "",
   "promotion": "",
   "total": "",
-  "payment_method": ""
+  "payment_method": "",
+  "note": ""
 }
 
-หากไม่พบให้ is_found = false
-หากพบแค่บางส่วนให้กรอกเฉพาะที่เจอ ที่เหลือ "" 
-ห้ามมีข้อความอื่นนอกจาก JSON
+เงื่อนไข:
+- หากไม่พบข้อมูลก็ให้ is_found = false
+- หากพบแค่บางส่วนให้กรอกเฉพาะที่เจอ ที่เหลือ ""
+- note: ถ้ามีเจอข้อความแนว "ขอแก้ที่อยู่", "ขอเปลี่ยนโปรโมชั่น" หรืออื่นๆ ที่ต้องการให้เป็นหมายเหตุ ให้สรุปสั้น ๆ เฉพาะประเด็น
+- ห้ามมีข้อความอื่นนอกจาก JSON
 `.trim();
 
   try {
@@ -586,21 +591,34 @@ async function extractOrderDataWithGPT(assistantMsg) {
   }
 }
 
+
 async function saveOrderToSheet(orderData) {
   try {
     console.log("[DEBUG] saveOrderToSheet => Start saving to Google Sheet...");
     const sheetsApi = await getSheetsApi();
 
     const timestamp = new Date().toLocaleString("th-TH");
+    const fbName = orderData.fb_name || "";
+    const customerName = orderData.customer_name || "";
+    const address = orderData.address || "";
+    const phone = orderData.phone || "";
+    const promotion = orderData.promotion || "";
+    const total = orderData.total || "";
+    const paymentMethod = orderData.payment_method || "";
+
+    // note เพิ่มขึ้นมา
+    const note = orderData.note || "";
+
     const rowValues = [
-      timestamp,
-      orderData.fb_name || "",        
-      orderData.customer_name || "",  
-      orderData.address || "",        
-      orderData.phone || "",
-      orderData.promotion || "",
-      orderData.total || "",
-      orderData.payment_method || "",
+      timestamp,        // A
+      fbName,           // B
+      customerName,     // C
+      address,          // D
+      phone,            // E
+      promotion,        // F
+      total,            // G
+      paymentMethod,    // H
+      note              // I (หมายเหตุ)
     ];
 
     console.log("[DEBUG] rowValues =", rowValues);
