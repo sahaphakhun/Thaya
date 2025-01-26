@@ -3,16 +3,15 @@
  * Google Sheets (INSTRUCTIONS) + 
  * Google Sheets (ใหม่) สำหรับบันทึกออเดอร์
  * (ปรับแก้ให้สามารถปิด/เปิด AI ด้วยข้อความจากแอดมินเพจ)
- * + ปรับแก้ตามเงื่อนไขใหม่:
- *   - ใช้ GPT (“gpt-4o-mini”) วิเคราะห์สถานะจากบทสนทนาทุกครั้ง (pending / ordered / ปฏิเสธรับ / alreadyPurchased)
- *   - Scheduler นับเวลาหลังลูกค้าตอบผ่าน lastUserReplyAt 
+ * + ปรับให้ทุกจุดเรียกโมเดลเป็น "gpt-4o-mini" เสมอ
+ * + เพิ่ม log สำหรับ debugging Scheduler
  *******************************************************/
 const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
 const util = require('util');            
 const requestPost = util.promisify(request.post);
-const requestGet = util.promisify(request.get);     // <--- สำหรับ get profile
+const requestGet = util.promisify(request.get);     
 const { google } = require('googleapis');
 const { MongoClient } = require('mongodb');
 const { OpenAI } = require('openai');
@@ -23,7 +22,6 @@ app.use(bodyParser.json());
 // ====================== 1) ENV Config ======================
 const PORT = process.env.PORT || 3000;
 
-// ควรเก็บไว้ใน Environment หรือไฟล์ config แยก
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN; 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "AiDee_a4wfaw4";
@@ -37,23 +35,20 @@ const GOOGLE_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0
 const GOOGLE_DOC_ID = "1IDvCXWa_5QllMTKrVSvhLRQPNNGkYgxb8byaDGGEhyU";
 
 // ------------------- (B) Google Sheet สำหรับ "INSTRUCTIONS" -------------------
-// *** ห้ามลบหรือแก้ไขส่วนนี้ ***
 const SPREADSHEET_ID = "1esN_P6JuPzYUGesR60zVuIGeuvSnRM1hlyaxCJbhI_c";
-const SHEET_RANGE = "ชีต1!A2:B28";  // Range สำหรับดึงข้อมูล instructions
+const SHEET_RANGE = "ชีต1!A2:B28";  
 
 // ------------------- (C) Google Sheet สำหรับ "บันทึกออเดอร์" (ใหม่) -------------------
-// เพิ่มคอลัมน์เป็น 8 คอลัมน์ (A2:H2) => [timestamp, facebookName, customerName, address, phone, promo, total, payment]
 const ORDERS_SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
 const SHEET_NAME_FOR_ORDERS = "บันทึกออเดอร์";
-const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:H`; // เริ่มเก็บที่แถว 2, คอลัมน์ A-H
+const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:H`; 
 
-// (NEW) ส่วน Follow-up ในแท็บ "ติดตามลูกค้า"
+// (NEW) สำหรับ Follow-up
 const FOLLOWUP_SHEET_RANGE = "ติดตามลูกค้า!A2:B";
 
 // ====================== 2) MongoDB ======================
 let mongoClient = null;
 
-/** ฟังก์ชันเชื่อมต่อ MongoDB (global) */
 async function connectDB() {
   if (!mongoClient) {
     mongoClient = new MongoClient(MONGO_URI);
@@ -63,10 +58,6 @@ async function connectDB() {
   return mongoClient;
 }
 
-/**
- * normalizeRoleContent:
- * ป้องกัน error เวลาส่งไป GPT (string/array)
- */
 function normalizeRoleContent(role, content) {
   if (typeof content === "string") {
     return { role, content };
@@ -77,7 +68,6 @@ function normalizeRoleContent(role, content) {
   return { role, content: JSON.stringify(content) };
 }
 
-/** ดึงประวัติแชทจาก MongoDB */
 async function getChatHistory(userId) {
   const client = await connectDB();
   const db = client.db("chatbot");
@@ -94,7 +84,6 @@ async function getChatHistory(userId) {
   });
 }
 
-/** บันทึกบทสนทนา ลง DB (เจาะจง role='user' หรือ role='assistant') */
 async function saveChatHistory(userId, messageContent, role = "user") {
   const client = await connectDB();
   const db = client.db("chatbot");
@@ -117,7 +106,6 @@ async function saveChatHistory(userId, messageContent, role = "user") {
   console.log(`[DEBUG] Saved message. userId=${userId}, role=${role}`);
 }
 
-/** เก็บสถานะ aiEnabled ของแต่ละ userId (PSID) */
 async function getUserStatus(userId) {
   const client = await connectDB();
   const db = client.db("chatbot");
@@ -144,7 +132,6 @@ async function setUserStatus(userId, aiEnabled) {
   );
 }
 
-/** เก็บสถานะการสั่งซื้อ (เช่น ordered, pending, ปฏิเสธรับ, alreadyPurchased ฯลฯ) ไว้ใน MongoDB */
 async function getCustomerOrderStatus(userId) {
   const client = await connectDB();
   const db = client.db("chatbot");
@@ -156,9 +143,7 @@ async function getCustomerOrderStatus(userId) {
       senderId: userId,
       orderStatus: "pending",
       followupIndex: 0,
-      // (NEW) เก็บเวลา user ตอบล่าสุด: เริ่มต้นเป็น new Date() (หรือ null ก็ได้)
       lastUserReplyAt: new Date(),
-      // ด้านล่างยังคงเก็บ lastFollowupAt ตามโค้ดเดิม
       lastFollowupAt: null,
       updatedAt: new Date()
     };
@@ -180,7 +165,6 @@ async function updateCustomerOrderStatus(userId, status) {
   );
 }
 
-// (เดิม) อัปเดต lastFollowupAt + followupIndex
 async function updateFollowupData(userId, followupIndex, lastFollowupDate) {
   console.log(`[DEBUG] updateFollowupData => userId=${userId}, followupIndex=${followupIndex}`);
   const client = await connectDB();
@@ -200,7 +184,6 @@ async function updateFollowupData(userId, followupIndex, lastFollowupDate) {
   );
 }
 
-// (NEW) อัปเดต lastUserReplyAt ทุกครั้งที่ลูกค้าส่งข้อความ
 async function updateLastUserReplyAt(userId, dateObj) {
   console.log(`[DEBUG] updateLastUserReplyAt => userId=${userId}, date=${dateObj}`);
   const client = await connectDB();
@@ -213,7 +196,6 @@ async function updateLastUserReplyAt(userId, dateObj) {
     { upsert: true }
   );
 }
-
 
 // ====================== 3) ดึง systemInstructions จาก Google Docs ======================
 let googleDocInstructions = "";
@@ -250,8 +232,7 @@ async function fetchGoogleDocInstructions() {
   }
 }
 
-
-// ====================== 4) ดึงข้อมูลจาก Google Sheets (INSTRUCTIONS) ======================
+// ====================== 4) ดึงข้อมูลจาก Google Sheets ======================
 async function getSheetsApi() {
   const sheetsAuth = new google.auth.JWT({
     email: GOOGLE_CLIENT_EMAIL,
@@ -261,10 +242,6 @@ async function getSheetsApi() {
   return google.sheets({ version: 'v4', auth: sheetsAuth });
 }
 
-/**
- * fetchSheetData: ดึงข้อมูลจาก Sheet (INSTRUCTIONS) หรือ Follow-up
- * *** ห้ามลบหรือแก้ไขส่วนนี้ ***
- */
 async function fetchSheetData(spreadsheetId, range) {
   console.log(`[DEBUG] fetchSheetData: spreadsheetId=${spreadsheetId}, range=${range}`);
   try {
@@ -283,11 +260,6 @@ async function fetchSheetData(spreadsheetId, range) {
   }
 }
 
-/**
- * parseSheetRowsToObjects:
- * แปลงข้อมูลจาก Google Sheets เป็น Array ของ Object
- * *** ห้ามลบหรือแก้ไขส่วนนี้ ***
- */
 function parseSheetRowsToObjects(rows) {
   if (!rows || rows.length < 2) {
     return [];
@@ -303,22 +275,15 @@ function parseSheetRowsToObjects(rows) {
   });
 }
 
-/** transformSheetRowsToJSON: เรียก parseSheetRowsToObjects */
 function transformSheetRowsToJSON(rows) {
   return parseSheetRowsToObjects(rows);
 }
 
-// จะถูกใช้งานใน buildSystemInstructions
 let sheetJSON = [];
 
-// (NEW) ส่วนติดตาม followupData
+// (NEW) followupData
 let followupData = [];
 
-/**
- * (NEW) loadFollowupData:
- *  ดึงข้อมูลในแท็บ "ติดตามลูกค้า!A2:B"
- *  แถวแรกเป็น (A2=เวลา(นาที), B2=ข้อความ)
- */
 async function loadFollowupData() {
   try {
     const rows = await fetchSheetData(SPREADSHEET_ID, FOLLOWUP_SHEET_RANGE);
@@ -333,8 +298,7 @@ async function loadFollowupData() {
   }
 }
 
-
-// ====================== 5) สร้าง systemInstructions (ผสาน Docs + Sheets) ======================
+// ====================== 5) buildSystemInstructions ======================
 function buildSystemInstructions() {
   const sheetsDataString = JSON.stringify(sheetJSON, null, 2);
 
@@ -355,24 +319,20 @@ Rules about images, privacy, etc...
   return finalSystemInstructions;
 }
 
-
-// ====================== 6) เรียก GPT (รองรับทั้งข้อความและรูป) ======================
+// ====================== 6) GPT ตอบลูกค้า (ใช้ gpt-4o-mini) ======================
 async function getAssistantResponse(systemInstructions, history, userContent) {
   try {
-    console.log("[DEBUG] getAssistantResponse => calling GPT...");
+    console.log("[DEBUG] getAssistantResponse => calling GPT (gpt-4o-mini)...");
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-    // สร้าง messages เริ่มจาก system + ประวัติ
     const messages = [
       { role: "system", content: systemInstructions },
       ...history
     ];
 
-    // ใส่ userContent
     let finalUserMessage = normalizeRoleContent("user", userContent);
     messages.push(finalUserMessage);
 
-    // เรียกโมเดล
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
@@ -384,7 +344,6 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
       assistantReply = JSON.stringify(assistantReply);
     }
 
-    // Cleanup กันวนลูป
     assistantReply = assistantReply.replace(/\[cut\]{2,}/g, "[cut]");
     const cutList = assistantReply.split("[cut]");
     if (cutList.length > 10) {
@@ -400,8 +359,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
   }
 }
 
-
-// ====================== 7) ฟังก์ชันส่งข้อความกลับ Facebook ======================
+// ====================== 7) ส่งข้อความกลับ Facebook ======================
 async function sendSimpleTextMessage(userId, text) {
   console.log(`[DEBUG] Sending text message to userId=${userId}, text="${text}"`);
   const reqBody = {
@@ -475,11 +433,6 @@ async function sendVideoMessage(userId, videoUrl) {
   }
 }
 
-/**
- * sendTextMessage:
- * - สแกน [SEND_IMAGE:...], [SEND_VIDEO:...]
- * - ส่งทีละ segment (split [cut])
- */
 async function sendTextMessage(userId, response) {
   console.log("[DEBUG] sendTextMessage => raw response:", response);
 
@@ -488,7 +441,6 @@ async function sendTextMessage(userId, response) {
   if (segments.length > 10) segments = segments.slice(0, 10);
 
   for (let segment of segments) {
-    // ดัก [SEND_IMAGE:URL], [SEND_VIDEO:URL]
     const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
     const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
 
@@ -500,33 +452,28 @@ async function sendTextMessage(userId, response) {
       .replace(videoRegex, '')
       .trim();
 
-    // ส่งรูป
     for (const match of images) {
       const imageUrl = match[1];
       await sendImageMessage(userId, imageUrl);
     }
 
-    // ส่งวิดีโอ
     for (const match of videos) {
       const videoUrl = match[1];
       await sendVideoMessage(userId, videoUrl);
     }
 
-    // ส่ง text
     if (textPart) {
       await sendSimpleTextMessage(userId, textPart);
     }
   }
 }
 
-
-// ====================== (NEW) ฟังก์ชันไปดึงชื่อเฟซจาก Graph API ======================
+// ====================== (NEW) ฟังก์ชัน getFacebookUserName ======================
 async function getFacebookUserName(userId) {
   try {
     const url = `https://graph.facebook.com/${userId}?fields=name&access_token=${PAGE_ACCESS_TOKEN}`;
     console.log(`[DEBUG] getFacebookUserName => GET ${url}`);
     const resp = await requestGet({ uri: url, json: true });
-    // resp.body => { name: "...", id: "..." }
     if (resp.body && resp.body.name) {
       return resp.body.name;
     }
@@ -537,8 +484,7 @@ async function getFacebookUserName(userId) {
   }
 }
 
-
-// ====================== 8) ฟังก์ชันตรวจจับและบันทึกออเดอร์จาก Assistant ======================
+// ====================== 8) ตรวจจับออเดอร์จาก Assistant ======================
 async function extractOrderDataWithGPT(assistantMsg) {
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
@@ -549,7 +495,7 @@ async function extractOrderDataWithGPT(assistantMsg) {
 - "address"
 - "phone"
 - "promotion"
-- "total" (ยอดรวม ถ้ามี)
+- "total"
 - "payment_method" (ถ้ามี)
 
 ตอบเป็น JSON เท่านั้น
@@ -565,12 +511,12 @@ async function extractOrderDataWithGPT(assistantMsg) {
 }
 
 หากไม่พบให้ is_found = false
-หากพบแค่บางส่วนให้กรอกเฉพาะที่เจอ ที่เหลือ "" (string ว่าง)
+หากพบแค่บางส่วนให้กรอกเฉพาะที่เจอ ที่เหลือ "" 
 ห้ามมีข้อความอื่นนอกจาก JSON
 `.trim();
 
   try {
-    console.log("[DEBUG] extractOrderDataWithGPT => calling GPT to parse order data...");
+    console.log("[DEBUG] extractOrderDataWithGPT => calling GPT (gpt-4o-mini)...");
     const messages = [
       { role: "system", content: sysPrompt },
       { role: "user", content: assistantMsg }
@@ -638,57 +584,38 @@ async function saveOrderToSheet(orderData) {
 
 async function detectAndSaveOrder(userId, assistantMsg) {
   console.log(`[DEBUG] detectAndSaveOrder => userId=${userId}`);
-
-  // 1) ดึงชื่อเฟซ
   const fbName = await getFacebookUserName(userId);
   console.log("[DEBUG] Fetched Facebook name:", fbName);
 
-  // 2) สกัดข้อมูลออเดอร์ด้วย GPT
   const parsed = await extractOrderDataWithGPT(assistantMsg);
   if (!parsed.is_found) {
     console.log("[DEBUG] detectAndSaveOrder: No order data found => skip saving");
     return;
   }
 
-  // 3) ใส่ fb_name ก่อนบันทึก
   parsed.fb_name = fbName || "";
-
-  // 4) บันทึกลงชีต
   await saveOrderToSheet(parsed);
 
-  // 5) อัปเดตสถานะใน Mongo (ถ้าเดิมไม่ใช่ alreadyPurchased)
   const statusColl = await getCustomerOrderStatus(userId);
   if (statusColl.orderStatus !== "alreadyPurchased") {
     await updateCustomerOrderStatus(userId, "ordered");
   }
 }
 
-
-// ====================== (NEW) 9) ฟังก์ชันวิเคราะห์สถานะด้วย gpt-4o-mini ======================
-/**
- * analyzeConversationForStatusChange:
- * - ดึงประวัติการสนทนา (user + assistant)
- * - ให้โมเดล gpt-4o-mini วิเคราะห์ แล้วสรุปว่าเป็น 1 ใน:
- *   "pending", "ordered", "ปฏิเสธรับ", "alreadyPurchased"
- * - หากสถานะเดิมเป็น "alreadyPurchased" จะไม่ revert
- * - หากสถานะเดิมเป็น "ordered" หรือ "ปฏิเสธรับ" ก็ไม่ revert เว้นแต่ว่าโมเดลบอก "alreadyPurchased" (อัปเดตได้)
- * - หากสถานะเดิมเป็น "pending" สามารถเปลี่ยนเป็นอะไรก็ได้ตามที่โมเดลระบุ
- */
+// ====================== 9) วิเคราะห์สถานะด้วย gpt-4o-mini ======================
 async function analyzeConversationForStatusChange(userId) {
   try {
     console.log("[DEBUG] analyzeConversationForStatusChange => userId=", userId);
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-    // 1) รวบรวมบทสนทนาทั้งหมดเป็น text ให้โมเดลอ่าน
     const chatHistory = await getChatHistory(userId);
     let conversationText = "";
     chatHistory.forEach(msg => {
       conversationText += `[${msg.role}] ${msg.content}\n`;
     });
 
-    // 2) สร้าง system prompt
     const sysPrompt = `
-คุณเป็นโปรแกรมสรุปสถานะการขายจากประวัติแชทในภาษาไทย
+คุณเป็นโปรแกรมสรุปสถานะการขายจากประวัติแชท
 ผลลัพธ์ = 1 ใน: "pending", "ordered", "ปฏิเสธรับ", "alreadyPurchased"
 ตอบเป็น JSON เท่านั้น เช่น:
 {
@@ -702,7 +629,6 @@ async function analyzeConversationForStatusChange(userId) {
       { role: "user", content: conversationText }
     ];
 
-    // 3) เรียก gpt-4o-mini
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
@@ -723,33 +649,26 @@ async function analyzeConversationForStatusChange(userId) {
     const newStatus = parsed.status || "pending";
     console.log("[DEBUG] newStatus from gpt-4o-mini =", newStatus);
 
-    // 4) เทียบกับสถานะใน DB
     const doc = await getCustomerOrderStatus(userId);
     const oldStatus = doc.orderStatus || "pending";
 
     if (oldStatus === "alreadyPurchased") {
-      // ไม่เปลี่ยน
       console.log("[DEBUG] oldStatus=alreadyPurchased => do not revert");
       return;
     }
     if (oldStatus === "ordered" && newStatus !== "alreadyPurchased") {
-      // ถ้า GPT บอก alreadyPurchased ก็อัปเดตเป็น alreadyPurchased ได้
-      // นอกนั้นไม่ revert
       if (newStatus === "alreadyPurchased") {
         await updateCustomerOrderStatus(userId, "alreadyPurchased");
       }
       return;
     }
     if (oldStatus === "ปฏิเสธรับ" && newStatus !== "alreadyPurchased") {
-      // เช่นเดียวกัน ถ้า GPT บอก alreadyPurchased ก็เปลี่ยน
       return;
     }
 
-    // ถ้าเก่าเป็น pending => เปลี่ยนได้
     if (oldStatus === "pending" && newStatus !== oldStatus) {
       await updateCustomerOrderStatus(userId, newStatus);
     }
-    // ถ้า GPT บอก "alreadyPurchased" ก็เปลี่ยน
     if (newStatus === "alreadyPurchased" && oldStatus !== "alreadyPurchased") {
       await updateCustomerOrderStatus(userId, "alreadyPurchased");
     }
@@ -759,20 +678,13 @@ async function analyzeConversationForStatusChange(userId) {
   }
 }
 
-
-// ====================== 10) Scheduler สำหรับติดตามลูกค้า ======================
-/**
- * startFollowupScheduler():
- * - ทำงานทุก 1 นาที
- * - หา user ที่ orderStatus = "pending" และ followupIndex < followupData.length
- * - ใช้ lastUserReplyAt เป็นตัวอ้างอิงเวลาที่ user ตอบล่าสุด
- * - ถ้า diffMin >= followupData[idx].time => ส่งข้อความติดตามครั้งที่ idx
- *   แล้ว update followupIndex + 1, update lastFollowupAt (โค้ดเดิม)
- * - ถ้าลูกค้าตอบกลับ => updateLastUserReplyAt => เวลาจะรีเซตไป
- */
+// ====================== 10) Scheduler สำหรับติดตามลูกค้า (มี debug log) ======================
 function startFollowupScheduler() {
   setInterval(async () => {
+    console.log("=== [Scheduler DEBUG] startFollowupScheduler triggered at", new Date().toISOString(), "===");
+
     if (!followupData || followupData.length === 0) {
+      console.log("[Scheduler DEBUG] followupData is empty => no follow-up");
       return;
     }
 
@@ -780,20 +692,19 @@ function startFollowupScheduler() {
     const db = client.db("chatbot");
     const coll = db.collection("customer_order_status");
 
-    // หาเฉพาะผู้ใช้ที่สถานะ = "pending" และ followupIndex ยังไม่ถึง limit
-    const cursor = coll.find({
+    // หา user ที่สถานะ pending
+    const now = new Date();
+    const pendingUsers = await coll.find({
       orderStatus: "pending",
       followupIndex: { $lt: followupData.length }
-    });
+    }).toArray();
 
-    const now = new Date();
-    const allUsers = await cursor.toArray();
-
-    for (let userDoc of allUsers) {
+    console.log(`[Scheduler DEBUG] Found ${pendingUsers.length} pending user(s) for follow-up check.`);
+    
+    for (let userDoc of pendingUsers) {
       const userId = userDoc.senderId;
       const idx = userDoc.followupIndex || 0;
 
-      // เดิมใช้ lastFollowupAt นับ => เปลี่ยนมาใช้ lastUserReplyAt
       const lastReply = userDoc.lastUserReplyAt 
           ? new Date(userDoc.lastUserReplyAt)
           : new Date(userDoc.updatedAt);
@@ -802,32 +713,26 @@ function startFollowupScheduler() {
       const diffMs = now - lastReply;
       const diffMin = diffMs / 60000;
 
+      console.log(`[Scheduler DEBUG] userId=${userId}, followupIndex=${idx}, requiredMin=${requiredMin}, diffMin=${diffMin.toFixed(2)}`);
+
       if (diffMin >= requiredMin) {
-        // ถึงเวลาส่ง followup
+        // ส่ง follow-up
         const msg = followupData[idx].message;
         console.log(`[FOLLOWUP] Sending followup #${idx+1} to userId=${userId}`);
 
-        // ส่งข้อความ
         await sendTextMessage(userId, msg);
-
-        // บันทึกลงประวัติ (assistant)
         await saveChatHistory(userId, msg, "assistant");
 
-        // อัปเดต followupIndex+1 และ lastFollowupAt
         await updateFollowupData(userId, idx + 1, new Date());
-
-        // (เพิ่มเติม) อาจเรียก analyzeConversationForStatusChange ก็ได้ 
-        // แต่ปกติจะรอให้ user ตอบกลับแล้วค่อยวิเคราะห์
       }
     }
+
   }, 60000); // 1 นาที
 }
-
 
 // ====================== 11) Webhook Routes & Startup ======================
 const processedMessageIds = new Set();
 
-// ยืนยัน webhook
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -839,7 +744,6 @@ app.get('/webhook', (req, res) => {
   return res.sendStatus(403);
 });
 
-// รับ event จาก Messenger
 app.post('/webhook', async (req, res) => {
   if (req.body.object === 'page') {
     for (const entry of req.body.entry) {
@@ -847,16 +751,14 @@ app.post('/webhook', async (req, res) => {
         continue;
       }
 
-      const pageId = entry.id; // อ้างอิง Page
+      const pageId = entry.id;
 
       for (const webhookEvent of entry.messaging) {
-        // ข้าม event จำพวก delivery/read
         if (webhookEvent.delivery || webhookEvent.read) {
           console.log("Skipping delivery/read event");
           continue;
         }
 
-        // กัน mid ซ้ำ
         if (webhookEvent.message && webhookEvent.message.mid) {
           const mid = webhookEvent.message.mid;
           if (processedMessageIds.has(mid)) {
@@ -867,80 +769,62 @@ app.post('/webhook', async (req, res) => {
           }
         }
 
-        // ระบุ userId
         let userId = (webhookEvent.sender.id === pageId)
           ? webhookEvent.recipient.id
           : webhookEvent.sender.id;
 
-        // เช็คถ้ามี message
         if (webhookEvent.message) {
           const textMsg = webhookEvent.message.text || "";
           const isEcho = webhookEvent.message.is_echo === true;
           const attachments = webhookEvent.message.attachments;
 
-          // (A) Echo Message (จากแอดมินเพจ)
           if (isEcho) {
             if (textMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
-              // ปิด AI
               await setUserStatus(userId, false);
               await saveChatHistory(userId, textMsg, "assistant");
               await sendSimpleTextMessage(userId, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ");
               continue;
             }
             else if (textMsg === "แอดมิน THAYA ยินดีดูแลลูกค้าค่ะ") {
-              // เปิด AI
               await setUserStatus(userId, true);
               await saveChatHistory(userId, textMsg, "assistant");
               await sendSimpleTextMessage(userId, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ");
               continue;
             }
             else {
-              // echo อื่น ๆ => ไม่ทำอะไร
               console.log("Skipping other echo");
               continue;
             }
           }
 
-          // (B) ข้อความจาก "ลูกค้า"
           const userStatus = await getUserStatus(userId);
           const aiEnabled = userStatus.aiEnabled;
 
-          // อัปเดต lastUserReplyAt => เพื่อรีเซตการนับ
           await updateLastUserReplyAt(userId, new Date());
 
           if (textMsg && !attachments) {
-            // เป็น text
             console.log(`[DEBUG] Received text from userId=${userId}:`, textMsg);
 
-            // บันทึกลง DB (user)
             await saveChatHistory(userId, textMsg, "user");
 
             if (!aiEnabled) {
-              // AI ปิด => ไม่เรียก GPT ตอบ
-              // แต่วิเคราะห์สถานะด้วย gpt-4o-mini ได้
               await analyzeConversationForStatusChange(userId);
               continue;
             }
 
-            // AI เปิด => เรียก GPT
             const history = await getChatHistory(userId);
             const systemInstructions = buildSystemInstructions();
             const assistantMsg = await getAssistantResponse(systemInstructions, history, textMsg);
 
-            // บันทึก assistant
             await saveChatHistory(userId, assistantMsg, "assistant");
 
-            // ตรวจว่ามีออเดอร์มั้ย
             await detectAndSaveOrder(userId, assistantMsg);
 
-            // ส่งข้อความ
             await sendTextMessage(userId, assistantMsg);
 
-            // วิเคราะห์สถานะ
             await analyzeConversationForStatusChange(userId);
 
           } else if (attachments && attachments.length > 0) {
-            // มีไฟล์แนบ
             console.log("[DEBUG] Received attachments from user:", attachments);
 
             let userContentArray = [{
@@ -971,34 +855,26 @@ app.post('/webhook', async (req, res) => {
               }
             }
 
-            // บันทึก user
             await saveChatHistory(userId, userContentArray, "user");
 
             if (!aiEnabled) {
-              // ไม่เรียก GPT
               await analyzeConversationForStatusChange(userId);
               continue;
             }
 
-            // AI เปิด => GPT
             const history = await getChatHistory(userId);
             const systemInstructions = buildSystemInstructions();
             const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
 
-            // บันทึก assistant
             await saveChatHistory(userId, assistantMsg, "assistant");
 
-            // ตรวจออเดอร์
             await detectAndSaveOrder(userId, assistantMsg);
 
-            // ส่งข้อความ
             await sendTextMessage(userId, assistantMsg);
 
-            // วิเคราะห์สถานะ
             await analyzeConversationForStatusChange(userId);
 
           } else {
-            // ไม่มี text และไม่มีไฟล์แนบ
             console.log(">> [Webhook] Received empty message:", webhookEvent);
           }
         } else {
@@ -1006,7 +882,6 @@ app.post('/webhook', async (req, res) => {
         }
       }
     }
-    // ตอบ FB ว่า EVENT_RECEIVED
     res.status(200).send("EVENT_RECEIVED");
   } else {
     res.sendStatus(404);
@@ -1018,20 +893,14 @@ app.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT}`);
 
   try {
-    // 1) เชื่อมต่อ DB
     await connectDB();
-
-    // 2) ดึง instructions จาก Google Docs
     await fetchGoogleDocInstructions();
 
-    // 3) โหลดข้อมูลจาก Google Sheet (INSTRUCTIONS) แล้วแปลงเป็น JSON
     const rows = await fetchSheetData(SPREADSHEET_ID, SHEET_RANGE);
     sheetJSON = transformSheetRowsToJSON(rows);
 
-    // (NEW) โหลดข้อมูลติดตามลูกค้า
     await loadFollowupData();
 
-    // (NEW) เริ่มฟังก์ชัน Scheduler
     startFollowupScheduler();
 
     console.log("[DEBUG] Startup completed. Ready to receive webhooks.");
