@@ -372,9 +372,9 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     let finalUserMessage = normalizeRoleContent("user", userContent);
     messages.push(finalUserMessage);
 
-    // เรียกโมเดล (สมมติใช้ gpt-3.5-turbo)
+    // เรียกโมเดล
     const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o-mini",
       messages,
       temperature: 0.2,
     });
@@ -577,7 +577,7 @@ async function extractOrderDataWithGPT(assistantMsg) {
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o-mini",
       messages,
       temperature: 0.0,
     });
