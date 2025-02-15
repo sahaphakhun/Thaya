@@ -681,6 +681,12 @@ async function analyzeConversationForStatusChange(userId) {
   "status": "pending"
 }
 ห้ามมีข้อความอื่นนอกจาก JSON
+
+หมายเหตุ :
+- pending คือ ยังไม่เกิดการซื้อขาย และลูกค้ายังไม่ปฏิเสธการรับสินค้า
+- ordered คือ ลูกค้าได้สั่งซื้อไปแล้ว
+- ปฏิเสธรับ คือ ลูกค้าปฏิเสธว่ายังไม่รับสินค้าหรือไม่รับสินค้า
+- alreadyPurchased คือ เคยเกิดการซื้อขายหรือเคยได้ผ่านสั่งซื้อมาแล้ว
 `.trim();
 
     const messages = [
