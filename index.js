@@ -22,10 +22,22 @@ app.use(bodyParser.json());
 // ====================== 1) ENV Config ======================
 const PORT = process.env.PORT || 3000;
 
-const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN; 
+// เปลี่ยนจาก PAGE_ACCESS_TOKEN เป็น PAGE_ACCESS_TOKENS (รองรับหลายเพจ)
+const PAGE_ACCESS_TOKENS = {
+  default: process.env.PAGE_ACCESS_TOKEN, // เพจหลักเดิม
+  page2: process.env.PAGE_ACCESS_TOKEN_2, // เพจที่ 2
+  page3: process.env.PAGE_ACCESS_TOKEN_3, // เพจที่ 3
+  page4: process.env.PAGE_ACCESS_TOKEN_4  // เพจที่ 4
+};
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "AiDee_a4wfaw4";
 const MONGO_URI = process.env.MONGO_URI;
+
+// เพิ่มการเก็บข้อมูลเพจ (pageId -> pageName)
+const PAGE_MAPPING = {
+  // ตัวอย่าง: 'page_id_1': 'default', 'page_id_2': 'page2', ...
+  // จะถูกเติมข้อมูลอัตโนมัติเมื่อมีการรับ webhook
+};
 
 // หากมีการเชื่อมต่อ Google Docs, Sheets
 const GOOGLE_CLIENT_EMAIL = "aitar-888@eminent-wares-446512-j8.iam.gserviceaccount.com";
@@ -41,7 +53,7 @@ const SHEET_RANGE = "ชีต1!A2:B28";  // (ยังคงเดิม ไม
 // ------------------- (C) Google Sheet สำหรับ "บันทึกออเดอร์" (ใหม่) -------------------
 const ORDERS_SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
 const SHEET_NAME_FOR_ORDERS = "บันทึกออเดอร์";
-const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:I`; 
+const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:J`; 
 
 // (NEW) สำหรับ Follow-up - แก้เป็น "A2:B" เพื่อไม่จำกัดจำนวนแถว
 const FOLLOWUP_SHEET_RANGE = "ติดตามลูกค้า!A2:B";
@@ -56,6 +68,162 @@ async function connectDB() {
     console.log("MongoDB connected (global).");
   }
   return mongoClient;
+}
+
+// เพิ่มฟังก์ชันสำหรับบันทึกประวัติการสนทนาสำหรับโมเดลบันทึกออเดอร์
+async function saveOrderChatHistory(userId, messageContent, role = "user") {
+  const client = await connectDB();
+  const db = client.db("chatbot");
+  const coll = db.collection("order_chat_history");
+
+  let msgToSave;
+  if (typeof messageContent === "string") {
+    msgToSave = messageContent;
+  } else {
+    msgToSave = JSON.stringify(messageContent);
+  }
+
+  console.log(`[DEBUG] Saving order chat history => role=${role}`);
+  await coll.insertOne({
+    senderId: userId,
+    role,
+    content: msgToSave,
+    timestamp: new Date(),
+  });
+  console.log(`[DEBUG] Saved order message. userId=${userId}, role=${role}`);
+}
+
+// เพิ่มฟังก์ชันสำหรับดึงประวัติการสนทนาสำหรับโมเดลบันทึกออเดอร์
+async function getOrderChatHistory(userId) {
+  const client = await connectDB();
+  const db = client.db("chatbot");
+  const coll = db.collection("order_chat_history");
+  const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
+  
+  return chats.map(ch => {
+    try {
+      const parsed = JSON.parse(ch.content);
+      return normalizeRoleContent(ch.role, parsed);
+    } catch (err) {
+      return normalizeRoleContent(ch.role, ch.content);
+    }
+  });
+}
+
+// เพิ่มฟังก์ชันสำหรับลบประวัติการสนทนาสำหรับโมเดลบันทึกออเดอร์
+async function clearOrderChatHistory(userId) {
+  const client = await connectDB();
+  const db = client.db("chatbot");
+  const coll = db.collection("order_chat_history");
+  
+  console.log(`[DEBUG] Clearing order chat history for userId=${userId}`);
+  await coll.deleteMany({ senderId: userId });
+  console.log(`[DEBUG] Cleared order chat history for userId=${userId}`);
+}
+
+// เพิ่มฟังก์ชันสำหรับบันทึกข้อมูลที่อยู่และเบอร์โทรของผู้ใช้
+async function saveUserContactInfo(userId, address, phone) {
+  const client = await connectDB();
+  const db = client.db("chatbot");
+  const coll = db.collection("user_contact_info");
+  
+  console.log(`[DEBUG] Saving user contact info => userId=${userId}`);
+  await coll.updateOne(
+    { userId },
+    { 
+      $set: { 
+        address,
+        phone,
+        updatedAt: new Date() 
+      } 
+    },
+    { upsert: true }
+  );
+  console.log(`[DEBUG] Saved user contact info. userId=${userId}`);
+}
+
+// เพิ่มฟังก์ชันสำหรับดึงข้อมูลที่อยู่และเบอร์โทรของผู้ใช้
+async function getUserContactInfo(userId) {
+  const client = await connectDB();
+  const db = client.db("chatbot");
+  const coll = db.collection("user_contact_info");
+  
+  const info = await coll.findOne({ userId });
+  if (!info) {
+    return { address: "", phone: "" };
+  }
+  
+  return {
+    address: info.address || "",
+    phone: info.phone || ""
+  };
+}
+
+// เพิ่มฟังก์ชันสำหรับสร้าง orderID
+function generateOrderID() {
+  const now = new Date();
+  const timestamp = now.getTime();
+  const randomStr = Math.random().toString(36).substring(2, 8);
+  return `ORD-${timestamp}-${randomStr}`;
+}
+
+// เพิ่มฟังก์ชันสำหรับตรวจสอบออเดอร์ซ้ำ
+async function checkDuplicateOrder(userId, phone, address, promotion) {
+  try {
+    console.log(`[DEBUG] checkDuplicateOrder => userId=${userId}, phone=${phone}, promotion=${promotion}`);
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("orders");
+    
+    // ตรวจสอบว่ามีออเดอร์ที่มีข้อมูลตรงกันในช่วง 24 ชั่วโมงที่ผ่านมาหรือไม่
+    const oneDayAgo = new Date();
+    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+    
+    const existingOrder = await coll.findOne({
+      userId: userId,
+      phone: phone,
+      promotion: promotion,
+      createdAt: { $gte: oneDayAgo }
+    });
+    
+    return existingOrder;
+  } catch (err) {
+    console.error("checkDuplicateOrder error:", err);
+    return null;
+  }
+}
+
+// เพิ่มฟังก์ชันสำหรับบันทึกออเดอร์ลง MongoDB
+async function saveOrderToDB(orderData, orderID) {
+  try {
+    console.log(`[DEBUG] saveOrderToDB => orderID=${orderID}`);
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("orders");
+    
+    const orderDoc = {
+      orderID: orderID,
+      userId: orderData.userId,
+      fb_name: orderData.fb_name || "",
+      customer_name: orderData.customer_name || "",
+      address: orderData.address || "",
+      phone: orderData.phone || "",
+      promotion: orderData.promotion || "",
+      total: orderData.total || "",
+      payment_method: orderData.payment_method || "",
+      note: orderData.note || "",
+      page_source: orderData.page_source || "default",
+      createdAt: new Date(),
+      status: "new" // สถานะเริ่มต้นของออเดอร์
+    };
+    
+    await coll.insertOne(orderDoc);
+    console.log(`[DEBUG] Order saved to DB: ${orderID}`);
+    return true;
+  } catch (err) {
+    console.error("saveOrderToDB error:", err);
+    return false;
+  }
 }
 
 function normalizeRoleContent(role, content) {
@@ -401,15 +569,17 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
 }
 
 // ====================== 7) ส่งข้อความกลับ Facebook ======================
-async function sendSimpleTextMessage(userId, text) {
-  console.log(`[DEBUG] Sending text message to userId=${userId}, text="${text}"`);
+async function sendSimpleTextMessage(userId, text, pageKey = 'default') {
+  console.log(`[DEBUG] Sending text message to userId=${userId}, text="${text}", pageKey=${pageKey}`);
+  const accessToken = PAGE_ACCESS_TOKENS[pageKey] || PAGE_ACCESS_TOKENS.default;
+  
   const reqBody = {
     recipient: { id: userId },
     message: { text }
   };
   const options = {
     uri: 'https://graph.facebook.com/v12.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
+    qs: { access_token: accessToken },
     method: 'POST',
     json: reqBody
   };
@@ -422,8 +592,10 @@ async function sendSimpleTextMessage(userId, text) {
   }
 }
 
-async function sendImageMessage(userId, imageUrl) {
-  console.log(`[DEBUG] Sending image to userId=${userId}, imageUrl=${imageUrl}`);
+async function sendImageMessage(userId, imageUrl, pageKey = 'default') {
+  console.log(`[DEBUG] Sending image to userId=${userId}, imageUrl=${imageUrl}, pageKey=${pageKey}`);
+  const accessToken = PAGE_ACCESS_TOKENS[pageKey] || PAGE_ACCESS_TOKENS.default;
+  
   const reqBody = {
     recipient: { id: userId },
     message: {
@@ -435,7 +607,7 @@ async function sendImageMessage(userId, imageUrl) {
   };
   const options = {
     uri: 'https://graph.facebook.com/v12.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
+    qs: { access_token: accessToken },
     method: 'POST',
     json: reqBody
   };
@@ -448,8 +620,10 @@ async function sendImageMessage(userId, imageUrl) {
   }
 }
 
-async function sendVideoMessage(userId, videoUrl) {
-  console.log(`[DEBUG] Sending video to userId=${userId}, videoUrl=${videoUrl}`);
+async function sendVideoMessage(userId, videoUrl, pageKey = 'default') {
+  console.log(`[DEBUG] Sending video to userId=${userId}, videoUrl=${videoUrl}, pageKey=${pageKey}`);
+  const accessToken = PAGE_ACCESS_TOKENS[pageKey] || PAGE_ACCESS_TOKENS.default;
+  
   const reqBody = {
     recipient: { id: userId },
     message: {
@@ -461,7 +635,7 @@ async function sendVideoMessage(userId, videoUrl) {
   };
   const options = {
     uri: 'https://graph.facebook.com/v12.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
+    qs: { access_token: accessToken },
     method: 'POST',
     json: reqBody
   };
@@ -474,7 +648,7 @@ async function sendVideoMessage(userId, videoUrl) {
   }
 }
 
-async function sendTextMessage(userId, response) {
+async function sendTextMessage(userId, response, pageKey = 'default') {
   console.log("[DEBUG] sendTextMessage => raw response:", response);
 
   response = response.replace(/\[cut\]{2,}/g, "[cut]");
@@ -495,25 +669,26 @@ async function sendTextMessage(userId, response) {
 
     for (const match of images) {
       const imageUrl = match[1];
-      await sendImageMessage(userId, imageUrl);
+      await sendImageMessage(userId, imageUrl, pageKey);
     }
 
     for (const match of videos) {
       const videoUrl = match[1];
-      await sendVideoMessage(userId, videoUrl);
+      await sendVideoMessage(userId, videoUrl, pageKey);
     }
 
     if (textPart) {
-      await sendSimpleTextMessage(userId, textPart);
+      await sendSimpleTextMessage(userId, textPart, pageKey);
     }
   }
 }
 
 // ====================== (NEW) ฟังก์ชัน getFacebookUserName ======================
-async function getFacebookUserName(userId) {
+async function getFacebookUserName(userId, pageKey = 'default') {
   try {
-    const url = `https://graph.facebook.com/${userId}?fields=name&access_token=${PAGE_ACCESS_TOKEN}`;
-    console.log(`[DEBUG] getFacebookUserName => GET ${url}`);
+    const accessToken = PAGE_ACCESS_TOKENS[pageKey] || PAGE_ACCESS_TOKENS.default;
+    const url = `https://graph.facebook.com/${userId}?fields=name&access_token=${accessToken}`;
+    console.log(`[DEBUG] getFacebookUserName => GET ${url}, pageKey=${pageKey}`);
     const resp = await requestGet({ uri: url, json: true });
     if (resp.body && resp.body.name) {
       return resp.body.name;
@@ -529,15 +704,18 @@ async function getFacebookUserName(userId) {
 async function extractOrderDataWithGPT(assistantMsg) {
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-  // เพิ่ม note ลงไปในโครงสร้าง JSON ด้วย
+  // ปรับปรุง prompt ให้ชัดเจนมากขึ้นเกี่ยวกับข้อมูลที่จำเป็นและการยืนยันการสั่งซื้อ
   const sysPrompt = `
 คุณเป็นโปรแกรมตรวจสอบว่าข้อความ AssistantMsg มีข้อมูลออเดอร์/ที่อยู่หรือไม่
-ถ้ามี ให้ดึง:
-- "customer_name"
-- "address"
-- "phone"
+ข้อมูลที่จำเป็นต้องมี (required) คือ:
+- "address" (ที่อยู่จัดส่ง)
+- "phone" (เบอร์โทรศัพท์)
 - "promotion" (โปร 1 แถม 1, โปร 2 แถม 3, โปร 3 แถม 5, โปร 5 แถม 9)
-- "total"
+- "confirmation" (ต้องมีการยืนยันการสั่งซื้อจากลูกค้าอย่างชัดเจน)
+
+ข้อมูลเพิ่มเติมที่ควรมี:
+- "customer_name" (ชื่อลูกค้า)
+- "total" (ยอดรวม)
 - "payment_method" (ถ้าไม่มี ให้ใส่ "เก็บเงินปลายทาง")
 - "note" (หากเจอคำขอแก้ที่อยู่หรือขอเปลี่ยนโปร ให้ใส่ลงไป เช่น "ลูกค้าขอแก้ที่อยู่", "ลูกค้าต้องการเปลี่ยนโปร")
 
@@ -551,13 +729,15 @@ async function extractOrderDataWithGPT(assistantMsg) {
   "promotion": "",
   "total": "",
   "payment_method": "",
-  "note": ""
+  "note": "",
+  "has_confirmation": true or false
 }
 
 เงื่อนไข:
-- หากไม่พบข้อมูลก็ให้ is_found = false
-- หากพบแค่บางส่วนให้กรอกเฉพาะที่เจอ ที่เหลือ ""
-- note: ถ้ามีเจอข้อความแนว "ขอแก้ที่อยู่", "ขอเปลี่ยนโปรโมชั่น" หรืออื่นๆ ที่ต้องการให้เป็นหมายเหตุ ให้สรุปสั้น ๆ เฉพาะประเด็น
+- หากไม่พบข้อมูลที่จำเป็นครบทั้ง 3 อย่าง (address, phone, promotion) ให้ is_found = false
+- การยืนยันการสั่งซื้อที่ชัดเจน หมายถึง ลูกค้าต้องแสดงเจตนาชัดเจนว่าต้องการสั่งซื้อ เช่น "สั่งเลย", "ยืนยันการสั่งซื้อ", "ขอสั่งซื้อ", "เอา", "ครับ", "ค่ะ" เป็นต้น
+- การพูดถึงโปรโมชั่นเพียงอย่างเดียวโดยไม่มีการยืนยันการสั่งซื้อ ไม่ถือว่าเป็นการยืนยันการสั่งซื้อ (ถ้า assistant ถามว่าลูกค้าเอาโปรไหน สนใจโปรไหน ลูกค้าตอบด่้วยชื่อโปร ให้นับเป็นการยืนยัน)
+- หากพบข้อมูลที่จำเป็นครบทั้ง 3 อย่าง และมีการยืนยันการสั่งซื้อที่ชัดเจน ให้ is_found = true และ has_confirmation = true
 - ห้ามมีข้อความอื่นนอกจาก JSON
 `.trim();
 
@@ -574,20 +754,36 @@ async function extractOrderDataWithGPT(assistantMsg) {
       temperature: 0.0,
     });
 
-    const gptAnswer = response.choices[0].message.content || "{}";
+    const gptAnswer = response.choices?.[0]?.message?.content || "{}";
 
     let data;
     try {
       data = JSON.parse(gptAnswer);
     } catch (e) {
       console.error("JSON parse error, got:", gptAnswer);
-      data = { is_found: false };
+      data = { is_found: false, has_confirmation: false };
     }
+    
+    // เพิ่มการตรวจสอบข้อมูลที่จำเป็นและการยืนยันการสั่งซื้อ
+    if (data.is_found) {
+      const hasAddress = data.address && data.address.trim() !== "";
+      const hasPhone = data.phone && data.phone.trim() !== "";
+      const hasPromotion = data.promotion && data.promotion.trim() !== "";
+      const hasConfirmation = data.has_confirmation === true;
+      
+      // ถ้าข้อมูลที่จำเป็นไม่ครบ หรือไม่มีการยืนยันการสั่งซื้อ ให้เปลี่ยน is_found เป็น false
+      if (!hasAddress || !hasPhone || !hasPromotion || !hasConfirmation) {
+        console.log("[DEBUG] extractOrderDataWithGPT => Required data missing or no confirmation, setting is_found to false");
+        console.log(`[DEBUG] Address: ${hasAddress}, Phone: ${hasPhone}, Promotion: ${hasPromotion}, Confirmation: ${hasConfirmation}`);
+        data.is_found = false;
+      }
+    }
+    
     console.log("[DEBUG] extractOrderDataWithGPT => parse result:", data);
     return data;
   } catch (e) {
     console.error("extractOrderDataWithGPT error:", e);
-    return { is_found: false };
+    return { is_found: false, has_confirmation: false };
   }
 }
 
@@ -595,19 +791,48 @@ async function extractOrderDataWithGPT(assistantMsg) {
 async function saveOrderToSheet(orderData) {
   try {
     console.log("[DEBUG] saveOrderToSheet => Start saving to Google Sheet...");
+    
+    // ตรวจสอบข้อมูลที่จำเป็นอีกครั้งก่อนบันทึกลงชีต
+    const address = orderData.address || "";
+    const phone = orderData.phone || "";
+    const promotion = orderData.promotion || "";
+    const userId = orderData.userId || "";
+    
+    // ตรวจสอบว่ามีข้อมูลหรือไม่ (แค่มีก็พอ)
+    if (!address.trim() || !phone.trim() || !promotion.trim() || !userId) {
+      console.log("[DEBUG] saveOrderToSheet => Missing required data, skipping save");
+      console.log(`[DEBUG] Address: "${address}", Phone: "${phone}", Promotion: "${promotion}", UserId: "${userId}"`);
+      return false;
+    }
+    
+    // สร้าง orderID
+    const orderID = generateOrderID();
+    
+    // บันทึกลง MongoDB ก่อน
+    const savedToDB = await saveOrderToDB({
+      ...orderData,
+      userId: userId,
+      orderID: orderID
+    }, orderID);
+    
+    if (!savedToDB) {
+      console.log(`[DEBUG] saveOrderToSheet => Failed to save to DB, skipping sheet save`);
+      return false;
+    }
+    
+    // บันทึกข้อมูลที่อยู่และเบอร์โทรของผู้ใช้
+    await saveUserContactInfo(userId, address, phone);
+    
     const sheetsApi = await getSheetsApi();
 
     const timestamp = new Date().toLocaleString("th-TH");
     const fbName = orderData.fb_name || "";
     const customerName = orderData.customer_name || "";
-    const address = orderData.address || "";
-    const phone = orderData.phone || "";
-    const promotion = orderData.promotion || "";
     const total = orderData.total || "";
     const paymentMethod = orderData.payment_method || "";
-
-    // note เพิ่มขึ้นมา
     const note = orderData.note || "";
+    // เพิ่มข้อมูลเพจที่มาของออเดอร์
+    const pageSource = orderData.page_source || "default";
 
     const rowValues = [
       timestamp,        // A
@@ -618,7 +843,9 @@ async function saveOrderToSheet(orderData) {
       promotion,        // F
       total,            // G
       paymentMethod,    // H
-      note              // I (หมายเหตุ)
+      note,             // I (หมายเหตุ)
+      pageSource,       // J (เพจที่มา)
+      orderID           // K (เพิ่ม orderID)
     ];
 
     console.log("[DEBUG] rowValues =", rowValues);
@@ -635,29 +862,86 @@ async function saveOrderToSheet(orderData) {
 
     const result = await sheetsApi.spreadsheets.values.append(request);
     console.log("Order saved to sheet:", result.statusText);
+    
+    // ลบประวัติการสนทนาของโมเดลบันทึกออเดอร์หลังจากบันทึกสำเร็จ
+    await clearOrderChatHistory(userId);
+    console.log(`[DEBUG] Cleared order chat history after successful order for userId=${userId}`);
+    
+    return true;
 
   } catch (err) {
     console.error("saveOrderToSheet error:", err);
+    return false;
   }
 }
 
-async function detectAndSaveOrder(userId, assistantMsg) {
-  console.log(`[DEBUG] detectAndSaveOrder => userId=${userId}`);
-  const fbName = await getFacebookUserName(userId);
+async function detectAndSaveOrder(userId, assistantMsg, pageKey = 'default') {
+  console.log(`[DEBUG] detectAndSaveOrder => userId=${userId}, pageKey=${pageKey}`);
+  const fbName = await getFacebookUserName(userId, pageKey);
   console.log("[DEBUG] Fetched Facebook name:", fbName);
 
+  // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์
+  await saveOrderChatHistory(userId, assistantMsg, "assistant");
+  
   const parsed = await extractOrderDataWithGPT(assistantMsg);
   if (!parsed.is_found) {
-    console.log("[DEBUG] detectAndSaveOrder: No order data found => skip saving");
+    console.log("[DEBUG] detectAndSaveOrder: No order data found or no confirmation => skip saving");
     return;
   }
 
-  parsed.fb_name = fbName || "";
-  await saveOrderToSheet(parsed);
+  // เพิ่มการตรวจสอบข้อมูลที่จำเป็นต้องมีก่อนบันทึกออเดอร์
+  const address = parsed.address || "";
+  const phone = parsed.phone || "";
+  const promotion = parsed.promotion || "";
 
-  const statusColl = await getCustomerOrderStatus(userId);
-  if (statusColl.orderStatus !== "alreadyPurchased") {
-    await updateCustomerOrderStatus(userId, "ordered");
+  // ตรวจสอบว่ามีข้อมูลหรือไม่ (แค่มีก็พอ)
+  const hasRequiredAddress = address.trim() !== "";
+  const hasRequiredPhone = phone.trim() !== "";
+  const hasRequiredPromotion = promotion.trim() !== "";
+
+  if (!hasRequiredAddress || !hasRequiredPhone || !hasRequiredPromotion) {
+    console.log("[DEBUG] detectAndSaveOrder: Missing required data => skip saving");
+    console.log(`[DEBUG] Address: ${hasRequiredAddress}, Phone: ${hasRequiredPhone}, Promotion: ${hasRequiredPromotion}`);
+    return;
+  }
+
+  // ตรวจสอบกรณีลูกค้าระบุ "ที่อยู่เดิม" หรือ "เบอร์เดิม"
+  if (address.includes("เดิม") || phone.includes("เดิม")) {
+    console.log("[DEBUG] detectAndSaveOrder: Customer requested to use previous contact info");
+    
+    // ดึงข้อมูลที่อยู่และเบอร์โทรเดิมของลูกค้า
+    const contactInfo = await getUserContactInfo(userId);
+    
+    // ถ้ามีข้อมูลเดิม ให้ใช้ข้อมูลเดิมแทน
+    if (address.includes("เดิม") && contactInfo.address) {
+      parsed.address = contactInfo.address;
+      console.log(`[DEBUG] Using previous address: ${parsed.address}`);
+    }
+    
+    if (phone.includes("เดิม") && contactInfo.phone) {
+      parsed.phone = contactInfo.phone;
+      console.log(`[DEBUG] Using previous phone: ${parsed.phone}`);
+    }
+  }
+
+  parsed.fb_name = fbName || "";
+  // เพิ่มข้อมูลเพจที่มาของออเดอร์
+  parsed.page_source = pageKey;
+  // เพิ่ม userId เข้าไปใน parsed data
+  parsed.userId = userId;
+  
+  // รับค่าที่ส่งกลับจาก saveOrderToSheet
+  const saveSuccess = await saveOrderToSheet(parsed);
+  
+  // อัปเดตสถานะลูกค้าเฉพาะเมื่อบันทึกออเดอร์สำเร็จเท่านั้น
+  if (saveSuccess) {
+    console.log("[DEBUG] detectAndSaveOrder: Order saved successfully => updating customer status");
+    const statusColl = await getCustomerOrderStatus(userId);
+    if (statusColl.orderStatus !== "alreadyPurchased") {
+      await updateCustomerOrderStatus(userId, "ordered");
+    }
+  } else {
+    console.log("[DEBUG] detectAndSaveOrder: Failed to save order => not updating customer status");
   }
 }
 
@@ -815,7 +1099,22 @@ function startFollowupScheduler() {
           // อัปเดต followupIndex ก่อนส่งข้อความ เพื่อป้องกันการส่งซ้ำ
           await updateFollowupData(userId, idx + 1, new Date());
           
-          await sendTextMessage(userId, msg);
+          // หา pageKey ที่เหมาะสมสำหรับผู้ใช้นี้
+          // ตรวจสอบจากประวัติการสนทนาล่าสุด
+          const history = await getChatHistory(userId);
+          let pageKey = 'default';
+          
+          // ถ้ามีประวัติการสนทนา ให้ดูว่าล่าสุดคุยกับเพจไหน
+          if (history.length > 0) {
+            // ตรวจสอบว่าผู้ใช้นี้เคยคุยกับเพจไหนล่าสุด
+            // โดยดูจากข้อมูลใน MongoDB หรือใช้ค่า default
+            const userPageData = await db.collection("user_page_mapping").findOne({ userId });
+            if (userPageData && userPageData.pageKey) {
+              pageKey = userPageData.pageKey;
+            }
+          }
+          
+          await sendTextMessage(userId, msg, pageKey);
           await saveChatHistory(userId, msg, "assistant");
         }
       }
@@ -849,6 +1148,37 @@ app.post('/webhook', async (req, res) => {
       }
 
       const pageId = entry.id;
+      
+      // ตรวจสอบว่าเคยเจอ pageId นี้หรือยัง ถ้ายังให้เก็บไว้ใน PAGE_MAPPING
+      let pageKey = 'default';
+      if (PAGE_MAPPING[pageId]) {
+        pageKey = PAGE_MAPPING[pageId];
+      } else {
+        // ถ้าเป็น pageId ใหม่ ให้ตรวจสอบว่าตรงกับ access token ไหน
+        for (const [key, token] of Object.entries(PAGE_ACCESS_TOKENS)) {
+          if (token) {
+            try {
+              // ทดสอบเรียก API ด้วย token นี้เพื่อดูว่าตรงกับ pageId นี้หรือไม่
+              const url = `https://graph.facebook.com/me?access_token=${token}`;
+              const resp = await requestGet({ uri: url, json: true });
+              if (resp.body && resp.body.id === pageId) {
+                pageKey = key;
+                PAGE_MAPPING[pageId] = key;
+                console.log(`[DEBUG] Found new page mapping: pageId=${pageId} -> pageKey=${pageKey}`);
+                break;
+              }
+            } catch (err) {
+              console.error(`[DEBUG] Error checking page token for key=${key}:`, err.message);
+            }
+          }
+        }
+        
+        // ถ้ายังไม่เจอ ให้ใช้ default และบันทึกไว้
+        if (!PAGE_MAPPING[pageId]) {
+          PAGE_MAPPING[pageId] = pageKey;
+          console.log(`[DEBUG] Using default pageKey for pageId=${pageId}`);
+        }
+      }
 
       for (const webhookEvent of entry.messaging) {
         if (webhookEvent.delivery || webhookEvent.read) {
@@ -870,6 +1200,9 @@ app.post('/webhook', async (req, res) => {
           ? webhookEvent.recipient.id
           : webhookEvent.sender.id;
 
+        // บันทึกข้อมูลการเชื่อมโยงระหว่างผู้ใช้กับเพจ
+        await saveUserPageMapping(userId, pageKey);
+
         if (webhookEvent.message) {
           const textMsg = webhookEvent.message.text || "";
           const isEcho = webhookEvent.message.is_echo === true;
@@ -879,13 +1212,13 @@ app.post('/webhook', async (req, res) => {
             if (textMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
               await setUserStatus(userId, false);
               await saveChatHistory(userId, textMsg, "assistant");
-              await sendSimpleTextMessage(userId, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ");
+              await sendSimpleTextMessage(userId, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ", pageKey);
               continue;
             }
             else if (textMsg === "แอดมิน THAYA ยินดีดูแลลูกค้าค่ะ") {
               await setUserStatus(userId, true);
               await saveChatHistory(userId, textMsg, "assistant");
-              await sendSimpleTextMessage(userId, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ");
+              await sendSimpleTextMessage(userId, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ", pageKey);
               continue;
             }
             else {
@@ -900,9 +1233,11 @@ app.post('/webhook', async (req, res) => {
           await updateLastUserReplyAt(userId, new Date());
 
           if (textMsg && !attachments) {
-            console.log(`[DEBUG] Received text from userId=${userId}:`, textMsg);
+            console.log(`[DEBUG] Received text from userId=${userId}, pageKey=${pageKey}:`, textMsg);
 
             await saveChatHistory(userId, textMsg, "user");
+            // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
+            await saveOrderChatHistory(userId, textMsg, "user");
 
             if (!aiEnabled) {
               await analyzeConversationForStatusChange(userId);
@@ -915,14 +1250,14 @@ app.post('/webhook', async (req, res) => {
 
             await saveChatHistory(userId, assistantMsg, "assistant");
 
-            await detectAndSaveOrder(userId, assistantMsg);
+            await detectAndSaveOrder(userId, assistantMsg, pageKey);
 
-            await sendTextMessage(userId, assistantMsg);
+            await sendTextMessage(userId, assistantMsg, pageKey);
 
             await analyzeConversationForStatusChange(userId);
 
           } else if (attachments && attachments.length > 0) {
-            console.log("[DEBUG] Received attachments from user:", attachments);
+            console.log(`[DEBUG] Received attachments from user=${userId}, pageKey=${pageKey}:`, attachments);
 
             // ==== ส่วนแก้ไข: จัดการ attachments แบบโค้ดที่สอง ====
             let userContentArray = [{
@@ -957,6 +1292,8 @@ app.post('/webhook', async (req, res) => {
             // ==== จบส่วนแก้ไข attachments ====
 
             await saveChatHistory(userId, userContentArray, "user");
+            // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
+            await saveOrderChatHistory(userId, userContentArray, "user");
 
             if (!aiEnabled) {
               await analyzeConversationForStatusChange(userId);
@@ -969,9 +1306,9 @@ app.post('/webhook', async (req, res) => {
 
             await saveChatHistory(userId, assistantMsg, "assistant");
 
-            await detectAndSaveOrder(userId, assistantMsg);
+            await detectAndSaveOrder(userId, assistantMsg, pageKey);
 
-            await sendTextMessage(userId, assistantMsg);
+            await sendTextMessage(userId, assistantMsg, pageKey);
 
             await analyzeConversationForStatusChange(userId);
 
@@ -1009,3 +1346,70 @@ app.listen(PORT, async () => {
     console.error("Startup error:", err);
   }
 });
+
+// ฟังก์ชันสำหรับบันทึกข้อมูลการเชื่อมโยงระหว่างผู้ใช้กับเพจ
+async function saveUserPageMapping(userId, pageKey) {
+  try {
+    console.log(`[DEBUG] saveUserPageMapping: userId=${userId}, pageKey=${pageKey}`);
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("user_page_mapping");
+
+    await coll.updateOne(
+      { userId },
+      { $set: { pageKey, updatedAt: new Date() } },
+      { upsert: true }
+    );
+  } catch (err) {
+    console.error("saveUserPageMapping error:", err);
+  }
+}
+
+// ฟังก์ชันสำหรับตรวจสอบความถูกต้องของเบอร์โทรศัพท์
+function isValidThaiPhoneNumber(phone) {
+  if (!phone || typeof phone !== 'string') {
+    return false;
+  }
+  
+  // ลบช่องว่างและอักขระพิเศษออก
+  const cleanedPhone = phone.replace(/[\s\-\(\)\+\.]/g, '');
+  
+  // ถ้าไม่มีตัวเลขเลย ถือว่าไม่ใช่เบอร์โทร
+  if (!/\d/.test(cleanedPhone)) {
+    return false;
+  }
+  
+  // ตรวจสอบว่ามีตัวอักษรหรือไม่ (ถ้ามีตัวอักษรมากเกินไป อาจไม่ใช่เบอร์โทร)
+  const letterCount = (cleanedPhone.match(/[a-zA-Z]/g) || []).length;
+  if (letterCount > 2) { // อนุญาตให้มีตัวอักษรได้บ้าง (อาจเป็นการพิมพ์ผิด)
+    return false;
+  }
+  
+  // ดึงเฉพาะตัวเลขออกมา
+  const digitsOnly = cleanedPhone.replace(/\D/g, '');
+  
+  // ตรวจสอบความยาวของเบอร์โทร
+  // เบอร์มือถือไทยปกติมี 10 หลัก (0ตามด้วย 9 หลัก)
+  // หรือบางครั้งอาจมี 9 หลัก (ไม่มี 0 นำหน้า)
+  // หรืออาจมี 8 หลัก (ในกรณีเบอร์บ้านบางเบอร์)
+  if (digitsOnly.length < 8 || digitsOnly.length > 10) {
+    return false;
+  }
+  
+  // ถ้าเป็นเบอร์ 10 หลัก ต้องขึ้นต้นด้วย 0
+  if (digitsOnly.length === 10 && !digitsOnly.startsWith('0')) {
+    return false;
+  }
+  
+  // ถ้าเป็นเบอร์ 9 หลัก ต้องขึ้นต้นด้วย 6, 8, 9 (เบอร์มือถือทั่วไป)
+  if (digitsOnly.length === 9 && !/^[689]/.test(digitsOnly)) {
+    // แต่ถ้าเป็นเบอร์ที่ขึ้นต้นด้วย 2 (เบอร์บ้านกรุงเทพฯ) ก็ให้ผ่าน
+    if (!digitsOnly.startsWith('2')) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+// ฟังก์ชันสำหรับตรวจสอบความถูกต้องของที่อยู่
