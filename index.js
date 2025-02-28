@@ -53,7 +53,7 @@ const SHEET_RANGE = "ชีต1!A2:B28";  // (ยังคงเดิม ไม
 // ------------------- (C) Google Sheet สำหรับ "บันทึกออเดอร์" (ใหม่) -------------------
 const ORDERS_SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
 const SHEET_NAME_FOR_ORDERS = "บันทึกออเดอร์";
-const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:J`; 
+const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:K`; 
 
 // (NEW) สำหรับ Follow-up - แก้เป็น "A2:B" เพื่อไม่จำกัดจำนวนแถว
 const FOLLOWUP_SHEET_RANGE = "ติดตามลูกค้า!A2:B";
