@@ -750,53 +750,80 @@ async function analyzeConversationForStatusChange(userId) {
 
 // ====================== 10) Scheduler สำหรับติดตามลูกค้า (มี debug log) ======================
 function startFollowupScheduler() {
+  // เพิ่มตัวแปรเพื่อป้องกันการทำงานซ้อนกัน
+  let isRunning = false;
+  
   setInterval(async () => {
-    console.log("=== [Scheduler DEBUG] startFollowupScheduler triggered at", new Date().toISOString(), "===");
-
-    if (!followupData || followupData.length === 0) {
-      console.log("[Scheduler DEBUG] followupData is empty => no follow-up");
+    // ถ้ากำลังทำงานอยู่ ให้ข้ามรอบนี้ไป
+    if (isRunning) {
+      console.log("[Scheduler DEBUG] Previous execution still running, skipping this cycle");
       return;
     }
-
-    const client = await connectDB();
-    const db = client.db("chatbot");
-    const coll = db.collection("customer_order_status");
-
-    // หา user ที่สถานะ pending
-    const now = new Date();
-    const pendingUsers = await coll.find({
-      orderStatus: "pending",
-      followupIndex: { $lt: followupData.length }
-    }).toArray();
-
-    console.log(`[Scheduler DEBUG] Found ${pendingUsers.length} pending user(s) for follow-up check.`);
     
-    for (let userDoc of pendingUsers) {
-      const userId = userDoc.senderId;
-      const idx = userDoc.followupIndex || 0;
+    isRunning = true;
+    console.log("=== [Scheduler DEBUG] startFollowupScheduler triggered at", new Date().toISOString(), "===");
 
-      const lastReply = userDoc.lastUserReplyAt 
-          ? new Date(userDoc.lastUserReplyAt)
-          : new Date(userDoc.updatedAt);
-
-      const requiredMin = followupData[idx].time;
-      const diffMs = now - lastReply;
-      const diffMin = diffMs / 60000;
-
-      console.log(`[Scheduler DEBUG] userId=${userId}, followupIndex=${idx}, requiredMin=${requiredMin}, diffMin=${diffMin.toFixed(2)}`);
-
-      if (diffMin >= requiredMin) {
-        // ส่ง follow-up
-        const msg = followupData[idx].message;
-        console.log(`[FOLLOWUP] Sending followup #${idx+1} to userId=${userId}`);
-
-        await sendTextMessage(userId, msg);
-        await saveChatHistory(userId, msg, "assistant");
-
-        await updateFollowupData(userId, idx + 1, new Date());
+    try {
+      if (!followupData || followupData.length === 0) {
+        console.log("[Scheduler DEBUG] followupData is empty => no follow-up");
+        isRunning = false;
+        return;
       }
-    }
 
+      const client = await connectDB();
+      const db = client.db("chatbot");
+      const coll = db.collection("customer_order_status");
+
+      // หา user ที่สถานะ pending
+      const now = new Date();
+      const pendingUsers = await coll.find({
+        orderStatus: "pending",
+        followupIndex: { $lt: followupData.length }
+      }).toArray();
+
+      console.log(`[Scheduler DEBUG] Found ${pendingUsers.length} pending user(s) for follow-up check.`);
+      
+      for (let userDoc of pendingUsers) {
+        const userId = userDoc.senderId;
+        const idx = userDoc.followupIndex || 0;
+        const lastFollowupAt = userDoc.lastFollowupAt ? new Date(userDoc.lastFollowupAt) : null;
+
+        const lastReply = userDoc.lastUserReplyAt 
+            ? new Date(userDoc.lastUserReplyAt)
+            : new Date(userDoc.updatedAt);
+
+        const requiredMin = followupData[idx].time;
+        const diffMs = now - lastReply;
+        const diffMin = diffMs / 60000;
+
+        console.log(`[Scheduler DEBUG] userId=${userId}, followupIndex=${idx}, requiredMin=${requiredMin}, diffMin=${diffMin.toFixed(2)}`);
+
+        // เพิ่มการตรวจสอบว่าเคยส่ง followup ล่าสุดไปเมื่อไหร่
+        // ถ้าเคยส่งไปแล้วในช่วง 5 นาทีที่ผ่านมา ให้ข้ามไป
+        const shouldSkipDueToRecentFollowup = lastFollowupAt && ((now - lastFollowupAt) / 60000 < 5);
+        
+        if (shouldSkipDueToRecentFollowup) {
+          console.log(`[Scheduler DEBUG] userId=${userId}, followupIndex=${idx} - SKIPPED: recent followup sent less than 5 minutes ago`);
+          continue;
+        }
+
+        if (diffMin >= requiredMin) {
+          // ส่ง follow-up
+          const msg = followupData[idx].message;
+          console.log(`[FOLLOWUP] Sending followup #${idx+1} to userId=${userId}`);
+
+          // อัปเดต followupIndex ก่อนส่งข้อความ เพื่อป้องกันการส่งซ้ำ
+          await updateFollowupData(userId, idx + 1, new Date());
+          
+          await sendTextMessage(userId, msg);
+          await saveChatHistory(userId, msg, "assistant");
+        }
+      }
+    } catch (error) {
+      console.error("[Scheduler ERROR]", error);
+    } finally {
+      isRunning = false;
+    }
   }, 60000); // 1 นาที
 }
 
