@@ -1202,6 +1202,13 @@ app.post('/webhook', async (req, res) => {
 
         // บันทึกข้อมูลการเชื่อมโยงระหว่างผู้ใช้กับเพจ
         await saveUserPageMapping(userId, pageKey);
+        
+        // ตรวจสอบผู้ใช้ใหม่และส่งข้อความเริ่มต้น
+        const isNewUser = await checkAndSendWelcomeMessage(userId, pageKey);
+        if (isNewUser) {
+          // ถ้าเป็นผู้ใช้ใหม่และส่งข้อความเริ่มต้นแล้ว ให้ข้ามการประมวลผลข้อความนี้
+          continue;
+        }
 
         if (webhookEvent.message) {
           const textMsg = webhookEvent.message.text || "";
@@ -1413,3 +1420,72 @@ function isValidThaiPhoneNumber(phone) {
 }
 
 // ฟังก์ชันสำหรับตรวจสอบความถูกต้องของที่อยู่
+
+// เพิ่มฟังก์ชันสำหรับตรวจสอบผู้ใช้ใหม่และส่งข้อความเริ่มต้น
+async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
+  try {
+    console.log(`[DEBUG] Checking if user ${userId} is new...`);
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("chat_history");
+    
+    // ตรวจสอบว่ามีประวัติการสนทนาหรือไม่
+    const chatCount = await coll.countDocuments({ senderId: userId });
+    
+    if (chatCount === 0) {
+      console.log(`[DEBUG] New user detected: ${userId}. Sending welcome message...`);
+      
+      // ข้อความเริ่มต้นที่กำหนด
+      const welcomeMessage = `ยาสีฟันสูตรสมุนไพรพรีเมี่ยม
+สามารถใช้ได้ทั้งครอบครัว
+มีฟลูออไรด์ สูงถึง 1500 ppm*
+กำจัดเเบคทีเรียในปากได้ถึง 99%
+[SEND_IMAGE:https://i.imgur.com/DECZqCm.jpeg]
+[cut]
+ยาสีฟันสูตรใหม่
+- ป้องกันฟันผุ ลดกลิ่นปาก
+- ฟันขาว ลดคราบหินปูน
+- กำจัดแบคทีเรียในปาก
+เลือกใช้ "ยาสีฟันทยา"
+[SEND_IMAGE:https://i.imgur.com/Tk9WM15.jpeg]
+[cut]
+มาตราฐานทันตเเพทย์แนะนำ
+อัดแน่นสมุนไพรกว่า 5 ชนิด
+ยับยั้งการเจริญเติบโตแบคทีเรียในช่องปาก
+กระชับเหงือก ลดโอกาสการเกิดโรคเหงือก
+ช่วยให้ฟันให้แข็งแรง ฟลูออไรด์สูงมาก 1500ppm
+[SEND_IMAGE:https://i.imgur.com/Iz7zaK9.jpeg]
+[cut]
+จบปัญหาฟัน กลิ่นปาก คราบเหลือง
+การันตีเห็นผลตั้งแต่หลอดแรกที่ใช้เลยค่ะ
+[SEND_IMAGE:https://i.imgur.com/VRZCCXi.jpeg]
+[cut]
+[SEND_IMAGE:https://i.imgur.com/4rPBgoT.jpeg]
+[SEND_VIDEO:https://www.dropbox.com/scl/fi/2z9sp3jha5s3nsqw8h11s/1.mp4?rlkey=pvbolh7c5j1n7pxqnyg8jmzyd&e=1&st=a6ddzvzi&dl=1]
+[cut]
+ส่งฟรี มีเก็บเงินปลายทางค่ะ
+[SEND_IMAGE:https://i.imgur.com/mD7HVO5.jpeg]
+[cut]
+แนะนำโปรขายดี 2แถม3 ค่ะ
+โปรนี้คุ้มมาก ใช้ได้ยาวนาน 5-6 เดือน
+สามารถใช้ต่อเนื่องได้ยาวๆเลย เพื่อผลลัพธ์ที่ดีขึ้นค่ะ
+แถมแปรงสีฟันพรี่เมี่ยม 1เซ็ต ถึง 6 ด้าม
+[SEND_IMAGE:https://i.imgur.com/PznHSak.jpeg]
+[cut]
+สนใจรับโปรไหนดีคะ แจ้งแอดมินได้เลยค่ะ`;
+      
+      // ส่งข้อความเริ่มต้น
+      await sendTextMessage(userId, welcomeMessage, pageKey);
+      
+      // บันทึกข้อความเริ่มต้นลงในประวัติการสนทนา
+      await saveChatHistory(userId, welcomeMessage, "assistant");
+      
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error(`[ERROR] Failed to check and send welcome message: ${error.message}`);
+    return false;
+  }
+}
