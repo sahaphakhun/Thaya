@@ -1203,13 +1203,6 @@ app.post('/webhook', async (req, res) => {
         // บันทึกข้อมูลการเชื่อมโยงระหว่างผู้ใช้กับเพจ
         await saveUserPageMapping(userId, pageKey);
         
-        // ตรวจสอบผู้ใช้ใหม่และส่งข้อความเริ่มต้น
-        const isNewUser = await checkAndSendWelcomeMessage(userId, pageKey);
-        if (isNewUser) {
-          // ถ้าเป็นผู้ใช้ใหม่และส่งข้อความเริ่มต้นแล้ว ให้ข้ามการประมวลผลข้อความนี้
-          continue;
-        }
-
         if (webhookEvent.message) {
           const textMsg = webhookEvent.message.text || "";
           const isEcho = webhookEvent.message.is_echo === true;
@@ -1241,6 +1234,13 @@ app.post('/webhook', async (req, res) => {
 
           if (textMsg && !attachments) {
             console.log(`[DEBUG] Received text from userId=${userId}, pageKey=${pageKey}:`, textMsg);
+
+            // ตรวจสอบผู้ใช้ใหม่และส่งข้อความเริ่มต้น (ก่อนการบันทึกข้อความ)
+            const isNewUser = await checkAndSendWelcomeMessage(userId, pageKey);
+            if (isNewUser) {
+              // ถ้าเป็นผู้ใช้ใหม่และส่งข้อความเริ่มต้นแล้ว ให้ข้ามการประมวลผลข้อความนี้
+              continue;
+            }
 
             await saveChatHistory(userId, textMsg, "user");
             // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
@@ -1297,6 +1297,13 @@ app.post('/webhook', async (req, res) => {
               }
             }
             // ==== จบส่วนแก้ไข attachments ====
+
+            // ตรวจสอบผู้ใช้ใหม่และส่งข้อความเริ่มต้น (ก่อนการบันทึกข้อความ)
+            const isNewUser = await checkAndSendWelcomeMessage(userId, pageKey);
+            if (isNewUser) {
+              // ถ้าเป็นผู้ใช้ใหม่และส่งข้อความเริ่มต้นแล้ว ให้ข้ามการประมวลผลข้อความนี้
+              continue;
+            }
 
             await saveChatHistory(userId, userContentArray, "user");
             // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
