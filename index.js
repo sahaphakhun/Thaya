@@ -27,7 +27,14 @@ const PAGE_ACCESS_TOKENS = {
   default: process.env.PAGE_ACCESS_TOKEN, // เพจหลักเดิม
   page2: process.env.PAGE_ACCESS_TOKEN_2, // เพจที่ 2
   page3: process.env.PAGE_ACCESS_TOKEN_3, // เพจที่ 3
-  page4: process.env.PAGE_ACCESS_TOKEN_4  // เพจที่ 4
+  page4: process.env.PAGE_ACCESS_TOKEN_4,  // เพจที่ 4
+  page5: process.env.PAGE_ACCESS_TOKEN_5,  // เพจที่ 5
+  page6: process.env.PAGE_ACCESS_TOKEN_6,  // เพจที่ 6
+  page7: process.env.PAGE_ACCESS_TOKEN_7,  // เพจที่ 7
+  page8: process.env.PAGE_ACCESS_TOKEN_8,  // เพจที่ 8
+  page9: process.env.PAGE_ACCESS_TOKEN_9,  // เพจที่ 9
+  page10: process.env.PAGE_ACCESS_TOKEN_10, // เพจที่ 10
+  page11: process.env.PAGE_ACCESS_TOKEN_11  // เพจที่ 11
 };
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "AiDee_a4wfaw4";
