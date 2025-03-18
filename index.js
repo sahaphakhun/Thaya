@@ -958,6 +958,17 @@ async function analyzeConversationForStatusChange(userId) {
     console.log("[DEBUG] analyzeConversationForStatusChange => userId=", userId);
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+    // ดึงสถานะปัจจุบันก่อน
+    const doc = await getCustomerOrderStatus(userId);
+    const currentStatus = doc.orderStatus || "pending";
+    
+    // ตรวจสอบสถานะปัจจุบัน หากเป็นสถานะที่ไม่ควรเปลี่ยนแล้ว ให้ข้ามการวิเคราะห์
+    // ยกเว้นกรณีที่เป็น ordered ที่อาจจะอัปเกรดเป็น alreadyPurchased ได้
+    if (currentStatus === "ปฏิเสธรับ" || currentStatus === "alreadyPurchased") {
+      console.log(`[DEBUG] userId=${userId}, currentStatus=${currentStatus} => SKIPPED analysis (final status)`);
+      return;
+    }
+
     const chatHistory = await getChatHistory(userId);
     let conversationText = "";
     chatHistory.forEach(msg => {
@@ -1003,35 +1014,23 @@ async function analyzeConversationForStatusChange(userId) {
     }
 
     const newStatus = parsed.status || "pending";
-    console.log("[DEBUG] newStatus from gpt-4o-mini =", newStatus);
+    console.log(`[DEBUG] userId=${userId}, currentStatus=${currentStatus}, newStatusFromGPT=${newStatus}`);
 
-    const doc = await getCustomerOrderStatus(userId);
-    const oldStatus = doc.orderStatus || "pending";
+    // กฎการเปลี่ยนสถานะ:
+    // 1. สถานะ "ordered" สามารถเปลี่ยนเป็น "alreadyPurchased" ได้เท่านั้น
+    // 2. สถานะ "ปฏิเสธรับ" และ "alreadyPurchased" ไม่สามารถเปลี่ยนกลับได้
+    // 3. สถานะ "pending" เปลี่ยนไปเป็นอะไรก็ได้ตามที่โมเดลวิเคราะห์
 
-    // ถ้าเคยเป็น "alreadyPurchased" อยู่แล้ว ไม่ย้อนกลับ
-    if (oldStatus === "alreadyPurchased") {
-      console.log("[DEBUG] oldStatus=alreadyPurchased => do not revert");
-      return;
-    }
-    // ถ้าเคย "ordered" อยู่แล้ว จะไม่สลับกลับไป pending ยกเว้นเป็น alreadyPurchased
-    if (oldStatus === "ordered" && newStatus !== "alreadyPurchased") {
-      if (newStatus === "alreadyPurchased") {
-        await updateCustomerOrderStatus(userId, "alreadyPurchased");
-      }
-      return;
-    }
-    // ถ้าเคย "ปฏิเสธรับ" อยู่แล้ว จะไม่สลับกลับ
-    if (oldStatus === "ปฏิเสธรับ" && newStatus !== "alreadyPurchased") {
-      return;
-    }
-
-    // ถ้าเป็น pending อยู่ แล้วโมเดลประเมินสถานะใหม่ != pending
-    if (oldStatus === "pending" && newStatus !== oldStatus) {
+    if (currentStatus === "pending" && newStatus !== "pending") {
+      console.log(`[DEBUG] Updating status: ${currentStatus} -> ${newStatus}`);
       await updateCustomerOrderStatus(userId, newStatus);
-    }
-    // ถ้าโมเดลบอก alreadyPurchased
-    if (newStatus === "alreadyPurchased" && oldStatus !== "alreadyPurchased") {
+    } 
+    else if (currentStatus === "ordered" && newStatus === "alreadyPurchased") {
+      console.log(`[DEBUG] Upgrading status: ${currentStatus} -> ${newStatus}`);
       await updateCustomerOrderStatus(userId, "alreadyPurchased");
+    }
+    else {
+      console.log(`[DEBUG] No status change needed. Current=${currentStatus}, Suggested=${newStatus}`);
     }
 
   } catch (err) {
@@ -1065,10 +1064,10 @@ function startFollowupScheduler() {
       const db = client.db("chatbot");
       const coll = db.collection("customer_order_status");
 
-      // หา user ที่สถานะ pending
+      // หา user ที่สถานะ pending เท่านั้น (ไม่รวม ordered, ปฏิเสธรับ, หรือ alreadyPurchased)
       const now = new Date();
       const pendingUsers = await coll.find({
-        orderStatus: "pending",
+        orderStatus: "pending", // เฉพาะสถานะ pending เท่านั้น
         followupIndex: { $lt: followupData.length }
       }).toArray();
 
@@ -1076,6 +1075,14 @@ function startFollowupScheduler() {
       
       for (let userDoc of pendingUsers) {
         const userId = userDoc.senderId;
+        
+        // เช็คสถานะอีกครั้งเพื่อความมั่นใจ (กรณีมีการอัปเดตระหว่างการทำงาน)
+        const currentStatus = await getCustomerOrderStatus(userId);
+        if (currentStatus.orderStatus !== "pending") {
+          console.log(`[Scheduler DEBUG] userId=${userId} - SKIPPED: current status is not pending (${currentStatus.orderStatus})`);
+          continue;
+        }
+        
         const idx = userDoc.followupIndex || 0;
         const lastFollowupAt = userDoc.lastFollowupAt ? new Date(userDoc.lastFollowupAt) : null;
 
@@ -1493,6 +1500,9 @@ async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
       
       // บันทึกข้อความเริ่มต้นลงในประวัติการสนทนา
       await saveChatHistory(userId, welcomeMessage, "assistant");
+      
+      // บันทึกข้อความเริ่มต้นลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
+      await saveOrderChatHistory(userId, welcomeMessage, "assistant");
       
       return true;
     }
