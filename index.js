@@ -378,21 +378,47 @@ async function updateCustomerOrderStatus(userId, status) {
 
 async function updateFollowupData(userId, followupIndex, lastFollowupDate) {
   console.log(`[DEBUG] updateFollowupData => userId=${userId}, followupIndex=${followupIndex}`);
-  const client = await connectDB();
-  const db = client.db("chatbot");
-  const coll = db.collection("customer_order_status");
+  try {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("customer_order_status");
 
-  await coll.updateOne(
-    { senderId: userId },
-    { 
-      $set: { 
-        followupIndex, 
-        lastFollowupAt: lastFollowupDate, 
-        updatedAt: new Date()
-      } 
-    },
-    { upsert: true }
-  );
+    await coll.updateOne(
+      { senderId: userId },
+      { $set: { 
+        followupIndex,
+        lastFollowupAt: lastFollowupDate,
+        updatedAt: new Date() 
+      } },
+      { upsert: true }
+    );
+  } catch (err) {
+    console.error("updateFollowupData error:", err);
+  }
+}
+
+// เพิ่มฟังก์ชันใหม่สำหรับปิดการใช้งาน followup สำหรับผู้ใช้เฉพาะราย
+async function disableFollowupForUser(userId) {
+  console.log(`[DEBUG] disableFollowupForUser => userId=${userId}`);
+  try {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("customer_order_status");
+
+    await coll.updateOne(
+      { senderId: userId },
+      { $set: { 
+        followupDisabled: true,
+        followupDisabledAt: new Date(),
+        updatedAt: new Date() 
+      } },
+      { upsert: true }
+    );
+    return true;
+  } catch (err) {
+    console.error("disableFollowupForUser error:", err);
+    return false;
+  }
 }
 
 async function updateLastUserReplyAt(userId, dateObj) {
@@ -406,6 +432,30 @@ async function updateLastUserReplyAt(userId, dateObj) {
     { $set: { lastUserReplyAt: dateObj, updatedAt: new Date() } },
     { upsert: true }
   );
+}
+
+// เพิ่มฟังก์ชันสำหรับเปิดใช้งาน followup อีกครั้ง
+async function enableFollowupForUser(userId) {
+  console.log(`[DEBUG] enableFollowupForUser => userId=${userId}`);
+  try {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("customer_order_status");
+
+    await coll.updateOne(
+      { senderId: userId },
+      { $set: { 
+        followupDisabled: false,
+        followupEnabledAt: new Date(),
+        updatedAt: new Date() 
+      } },
+      { upsert: true }
+    );
+    return true;
+  } catch (err) {
+    console.error("enableFollowupForUser error:", err);
+    return false;
+  }
 }
 
 // ====================== 3) ดึง systemInstructions จาก Google Docs ======================
@@ -1065,10 +1115,15 @@ function startFollowupScheduler() {
       const coll = db.collection("customer_order_status");
 
       // หา user ที่สถานะ pending เท่านั้น (ไม่รวม ordered, ปฏิเสธรับ, หรือ alreadyPurchased)
+      // เพิ่มเงื่อนไขให้ตรวจสอบ followupDisabled ด้วย
       const now = new Date();
       const pendingUsers = await coll.find({
         orderStatus: "pending", // เฉพาะสถานะ pending เท่านั้น
-        followupIndex: { $lt: followupData.length }
+        followupIndex: { $lt: followupData.length },
+        $or: [
+          { followupDisabled: { $exists: false } },
+          { followupDisabled: false }
+        ]
       }).toArray();
 
       console.log(`[Scheduler DEBUG] Found ${pendingUsers.length} pending user(s) for follow-up check.`);
@@ -1080,6 +1135,12 @@ function startFollowupScheduler() {
         const currentStatus = await getCustomerOrderStatus(userId);
         if (currentStatus.orderStatus !== "pending") {
           console.log(`[Scheduler DEBUG] userId=${userId} - SKIPPED: current status is not pending (${currentStatus.orderStatus})`);
+          continue;
+        }
+        
+        // ตรวจสอบ followupDisabled อีกครั้งแบบเจาะจง
+        if (currentStatus.followupDisabled === true) {
+          console.log(`[Scheduler DEBUG] userId=${userId} - SKIPPED: followup is disabled for this user`);
           continue;
         }
         
@@ -1235,6 +1296,18 @@ app.post('/webhook', async (req, res) => {
               await sendSimpleTextMessage(userId, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ", pageKey);
               continue;
             }
+            // เพิ่มการตรวจสอบคีย์เวิร์ด "#รับออเดอร์" สำหรับปิด followup
+            else if (textMsg.includes("#รับออเดอร์")) {
+              console.log(`[DEBUG] Admin command to disable followup for userId=${userId} via #รับออเดอร์ keyword`);
+              const success = await disableFollowupForUser(userId);
+              
+              if (success) {
+                console.log(`[DEBUG] Successfully disabled followup for userId=${userId} from admin command`);
+              } else {
+                console.error(`[ERROR] Failed to disable followup for userId=${userId} from admin command`);
+              }
+              continue;
+            }
             else {
               console.log("Skipping other echo");
               continue;
@@ -1248,6 +1321,102 @@ app.post('/webhook', async (req, res) => {
 
           if (textMsg && !attachments) {
             console.log(`[DEBUG] Received text from userId=${userId}, pageKey=${pageKey}:`, textMsg);
+
+            // เพิ่มการตรวจสอบข้อความสำหรับปิด followup
+            // ตรวจสอบคำสั่งปิด followup จากข้อความผู้ใช้ หรือจากแอดมิน
+            const followupDisableKeywords = [
+              'ปิด followup', 'ปิดการติดตาม', 'ไม่ต้องติดตาม', 'ยกเลิกการติดตาม', 
+              'ยกเลิก followup', 'ไม่ต้องส่ง followup', 'พอแล้ว followup',
+              'disable followup', 'stop followup', 'ปิดระบบติดตาม'
+            ];
+            
+            // เพิ่มคำสั่งเปิดใช้งานการติดตาม
+            const followupEnableKeywords = [
+              'เปิด followup', 'เปิดการติดตาม', 'ติดตามต่อ', 'เริ่มติดตามใหม่', 
+              'เปิด followup ใหม่', 'ให้ส่ง followup', 'ส่ง followup',
+              'enable followup', 'start followup', 'เปิดระบบติดตาม'
+            ];
+            
+            // ตรวจสอบว่าข้อความมีคำสั่งปิด followup หรือไม่
+            const hasDisableKeyword = followupDisableKeywords.some(keyword => 
+              textMsg.toLowerCase().includes(keyword.toLowerCase())
+            );
+            
+            // ตรวจสอบว่าข้อความมีคำสั่งเปิด followup หรือไม่
+            const hasEnableKeyword = followupEnableKeywords.some(keyword => 
+              textMsg.toLowerCase().includes(keyword.toLowerCase())
+            );
+            
+            // ตรวจสอบกรณีแอดมินต้องการปิด/เปิด followup สำหรับผู้ใช้เฉพาะราย
+            // รูปแบบ: "ปิด followup ของ 5487841234" หรือ "ปิด followup userId=5487841234"
+            if ((hasDisableKeyword || hasEnableKeyword) && 
+                (textMsg.includes("ของ ") || textMsg.includes("userId="))) {
+              
+              // ค้นหา userId จากข้อความ
+              let targetUserId = null;
+              
+              // ค้นหาแบบ "ของ 5487841234"
+              const matchOfPattern = textMsg.match(/ของ\s+(\d+)/);
+              if (matchOfPattern && matchOfPattern[1]) {
+                targetUserId = matchOfPattern[1];
+              }
+              
+              // ค้นหาแบบ "userId=5487841234"
+              const matchUserIdPattern = textMsg.match(/userId=(\d+)/);
+              if (!targetUserId && matchUserIdPattern && matchUserIdPattern[1]) {
+                targetUserId = matchUserIdPattern[1];
+              }
+              
+              if (targetUserId) {
+                console.log(`[DEBUG] Admin command to ${hasDisableKeyword ? 'disable' : 'enable'} followup for specific userId=${targetUserId}`);
+                
+                let success = false;
+                if (hasDisableKeyword) {
+                  success = await disableFollowupForUser(targetUserId);
+                } else {
+                  success = await enableFollowupForUser(targetUserId);
+                }
+                
+                if (success) {
+                  const action = hasDisableKeyword ? "ปิด" : "เปิด";
+                  const confirmMsg = `ระบบได้${action}การส่งข้อความติดตามสำหรับผู้ใช้ ${targetUserId} เรียบร้อยแล้วค่ะ`;
+                  await sendSimpleTextMessage(userId, confirmMsg, pageKey);
+                  await saveChatHistory(userId, confirmMsg, "assistant");
+                  console.log(`[DEBUG] Successfully ${hasDisableKeyword ? 'disabled' : 'enabled'} followup for targetUserId=${targetUserId}`);
+                } else {
+                  const confirmMsg = `ไม่สามารถ${hasDisableKeyword ? 'ปิด' : 'เปิด'}การส่งข้อความติดตามสำหรับผู้ใช้ ${targetUserId} ได้ค่ะ`;
+                  await sendSimpleTextMessage(userId, confirmMsg, pageKey);
+                  await saveChatHistory(userId, confirmMsg, "assistant");
+                  console.error(`[ERROR] Failed to ${hasDisableKeyword ? 'disable' : 'enable'} followup for targetUserId=${targetUserId}`);
+                }
+                
+                // ดำเนินการต่อกับข้อความนี้ตามปกติ
+              }
+            } else if (hasDisableKeyword) {
+              console.log(`[DEBUG] Detected followup disable command from userId=${userId}, text="${textMsg}"`);
+              const success = await disableFollowupForUser(userId);
+              
+              if (success) {
+                const confirmMsg = "ระบบได้ปิดการส่งข้อความติดตามสำหรับผู้ใช้นี้แล้วค่ะ";
+                await sendSimpleTextMessage(userId, confirmMsg, pageKey);
+                await saveChatHistory(userId, confirmMsg, "assistant");
+                console.log(`[DEBUG] Successfully disabled followup for userId=${userId}`);
+              } else {
+                console.error(`[ERROR] Failed to disable followup for userId=${userId}`);
+              }
+            } else if (hasEnableKeyword) {
+              console.log(`[DEBUG] Detected followup enable command from userId=${userId}, text="${textMsg}"`);
+              const success = await enableFollowupForUser(userId);
+              
+              if (success) {
+                const confirmMsg = "ระบบได้เปิดการส่งข้อความติดตามสำหรับผู้ใช้นี้อีกครั้งแล้วค่ะ";
+                await sendSimpleTextMessage(userId, confirmMsg, pageKey);
+                await saveChatHistory(userId, confirmMsg, "assistant");
+                console.log(`[DEBUG] Successfully enabled followup for userId=${userId}`);
+              } else {
+                console.error(`[ERROR] Failed to enable followup for userId=${userId}`);
+              }
+            }
 
             // ตรวจสอบผู้ใช้ใหม่และส่งข้อความเริ่มต้น (ก่อนการบันทึกข้อความ)
             const isNewUser = await checkAndSendWelcomeMessage(userId, pageKey);
