@@ -405,7 +405,11 @@ async function disableFollowupForUser(userId) {
     const db = client.db("chatbot");
     const coll = db.collection("customer_order_status");
 
-    await coll.updateOne(
+    // ตรวจสอบก่อนอัปเดต
+    const beforeDoc = await coll.findOne({ senderId: userId });
+    console.log(`[DEBUG] Before disableFollowupForUser: userId=${userId}, data=`, beforeDoc);
+
+    const result = await coll.updateOne(
       { senderId: userId },
       { $set: { 
         followupDisabled: true,
@@ -414,6 +418,12 @@ async function disableFollowupForUser(userId) {
       } },
       { upsert: true }
     );
+
+    // ตรวจสอบหลังอัปเดต
+    const afterDoc = await coll.findOne({ senderId: userId });
+    console.log(`[DEBUG] After disableFollowupForUser: userId=${userId}, data=`, afterDoc);
+    console.log(`[DEBUG] disableFollowupForUser result: matched=${result.matchedCount}, modified=${result.modifiedCount}, upserted=${result.upsertedCount}`);
+
     return true;
   } catch (err) {
     console.error("disableFollowupForUser error:", err);
@@ -1298,13 +1308,32 @@ app.post('/webhook', async (req, res) => {
             }
             // เพิ่มการตรวจสอบคีย์เวิร์ด "#รับออเดอร์" สำหรับปิด followup
             else if (textMsg.includes("#รับออเดอร์")) {
-              console.log(`[DEBUG] Admin command to disable followup for userId=${userId} via #รับออเดอร์ keyword`);
-              const success = await disableFollowupForUser(userId);
+              // ในกรณีข้อความ echo จาก messenger 
+              // webhookEvent.recipient.id คือ ID ของลูกค้าที่รับข้อความ
+              // webhookEvent.sender.id คือ ID ของเพจที่ส่งข้อความ (pageId)
+              
+              const recipientId = webhookEvent.recipient.id;
+              // ใช้ recipientId เป็น targetUserId เพราะเป็น ID ของลูกค้าที่รับข้อความจากแอดมิน
+              const targetUserId = recipientId;
+
+              console.log(`[DEBUG] Admin command to disable followup for userId=${targetUserId} via #รับออเดอร์ keyword`);
+              
+              // บันทึกก่อนการปิด followup เพื่อตรวจสอบ
+              console.log(`[DEBUG] Webhook event details for #รับออเดอร์:`, {
+                isEcho: isEcho,
+                senderId: webhookEvent.sender.id,
+                recipientId: recipientId,
+                originalUserId: userId,
+                targetUserId: targetUserId,
+                pageId: pageId
+              });
+              
+              const success = await disableFollowupForUser(targetUserId);
               
               if (success) {
-                console.log(`[DEBUG] Successfully disabled followup for userId=${userId} from admin command`);
+                console.log(`[DEBUG] Successfully disabled followup for userId=${targetUserId} from admin command #รับออเดอร์`);
               } else {
-                console.error(`[ERROR] Failed to disable followup for userId=${userId} from admin command`);
+                console.error(`[ERROR] Failed to disable followup for userId=${targetUserId} from admin command #รับออเดอร์`);
               }
               continue;
             }
@@ -1682,3 +1711,4 @@ async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
     return false;
   }
 }
+
