@@ -609,7 +609,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     messages.push(finalUserMessage);
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini",
       messages,
       temperature: 0.2,
     });
@@ -816,7 +816,7 @@ async function extractOrderDataWithGPT(assistantMsg) {
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-nano",
       messages,
       temperature: 0.0,
     });
@@ -1057,7 +1057,7 @@ async function analyzeConversationForStatusChange(userId) {
     ];
 
     const res = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-nano",
       messages,
       temperature: 0.0,
     });
