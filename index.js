@@ -243,6 +243,18 @@ function normalizeRoleContent(role, content) {
   return { role, content: JSON.stringify(content) };
 }
 
+// เพิ่มฟังก์ชันแปลง timestamp เป็นข้อความไทย
+function formatTimestampThai(dateObj) {
+  if (!dateObj) return "";
+  const d = new Date(dateObj);
+  const day = d.getDate().toString().padStart(2, '0');
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const year = (d.getFullYear() + 543).toString(); // แปลงเป็น พ.ศ.
+  const hour = d.getHours().toString().padStart(2, '0');
+  const min = d.getMinutes().toString().padStart(2, '0');
+  return `${day}/${month}/${year} ${hour}:${min}`;
+}
+
 async function getChatHistory(userId) {
   const client = await connectDB();
   const db = client.db("chatbot");
@@ -250,12 +262,26 @@ async function getChatHistory(userId) {
   const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
   
   return chats.map(ch => {
+    let content;
     try {
-      const parsed = JSON.parse(ch.content);
-      return normalizeRoleContent(ch.role, parsed);
+      content = JSON.parse(ch.content);
     } catch (err) {
-      return normalizeRoleContent(ch.role, ch.content);
+      content = ch.content;
     }
+    // แปะเวลาหน้าข้อความ
+    const timeStr = formatTimestampThai(ch.timestamp);
+    let msgWithTime;
+    if (typeof content === "string") {
+      msgWithTime = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content}`;
+    } else if (Array.isArray(content) && content.length > 0 && content[0].text) {
+      // ถ้าเป็น array (เช่น กรณีแนบไฟล์) ให้แปะเวลาที่ text หลัก
+      content = [...content]; // clone เพื่อไม่กระทบต้นฉบับ
+      content[0] = { ...content[0], text: `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content[0].text}` };
+      msgWithTime = content;
+    } else {
+      msgWithTime = content;
+    }
+    return { role: ch.role, content: msgWithTime };
   });
 }
 
@@ -1683,13 +1709,13 @@ async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
 [SEND_VIDEO:https://www.dropbox.com/scl/fi/2z9sp3jha5s3nsqw8h11s/1.mp4?rlkey=pvbolh7c5j1n7pxqnyg8jmzyd&e=1&st=a6ddzvzi&dl=1]
 [cut]
 ส่งฟรี มีเก็บเงินปลายทางค่ะ
-[SEND_IMAGE:https://i.imgur.com/mD7HVO5.jpeg]
+[SEND_IMAGE:https://i.postimg.cc/HL1qC59G/727278.png]
 [cut]
 แนะนำโปรขายดี 2แถม3 ค่ะ
 โปรนี้คุ้มมาก ใช้ได้ยาวนาน 5-6 เดือน
 สามารถใช้ต่อเนื่องได้ยาวๆเลย เพื่อผลลัพธ์ที่ดีขึ้นค่ะ
 แถมแปรงสีฟันพรี่เมี่ยม 1เซ็ต ถึง 6 ด้าม
-[SEND_IMAGE:https://i.imgur.com/PznHSak.jpeg]
+[SEND_IMAGE:https://i.postimg.cc/bJJ3XNWc/638-CAD93-5444-483-A-AE8-C-99-C9-C53-B2-C75.jpg]
 [cut]
 สนใจรับโปรไหนดีคะ แจ้งแอดมินได้เลยค่ะ`;
       
