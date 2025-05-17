@@ -279,7 +279,8 @@ async function getChatHistory(userId) {
       content[0] = { ...content[0], text: `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content[0].text}` };
       msgWithTime = content;
     } else {
-      msgWithTime = content;
+      // หาก content ไม่ใช่ string หรือ array ให้แปลงเป็น string พร้อม timestamp
+      msgWithTime = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${JSON.stringify(content)}`;
     }
     return { role: ch.role, content: msgWithTime };
   });
