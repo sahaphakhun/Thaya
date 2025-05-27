@@ -21,7 +21,6 @@ app.use(bodyParser.json());
 
 // ====================== 1) ENV Config ======================
 const PORT = process.env.PORT || 3000;
-
 // เปลี่ยนจาก PAGE_ACCESS_TOKEN เป็น PAGE_ACCESS_TOKENS (รองรับหลายเพจ)
 const PAGE_ACCESS_TOKENS = {
   default: process.env.PAGE_ACCESS_TOKEN, // เพจหลักเดิม
