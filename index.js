@@ -287,7 +287,7 @@ async function getChatHistory(userId) {
   });
 }
 
-async function saveChatHistory(userId, messageContent, role = "user") {
+async function saveChatHistory(userId, messageContent, role = "user", pageKey = "default") {
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("chat_history");
@@ -299,14 +299,15 @@ async function saveChatHistory(userId, messageContent, role = "user") {
     msgToSave = JSON.stringify(messageContent);
   }
 
-  console.log(`[DEBUG] Saving chat history => role=${role}`);
+  console.log(`[DEBUG] Saving chat history => role=${role}, pageKey=${pageKey}`);
   await coll.insertOne({
     senderId: userId,
     role,
+    pageKey,
     content: msgToSave,
     timestamp: new Date(),
   });
-  console.log(`[DEBUG] Saved message. userId=${userId}, role=${role}`);
+  console.log(`[DEBUG] Saved message. userId=${userId}, role=${role}, pageKey=${pageKey}`);
 }
 
 async function getUserStatus(userId) {
@@ -1228,7 +1229,7 @@ function startFollowupScheduler() {
           }
           
           await sendTextMessage(userId, msg, pageKey);
-          await saveChatHistory(userId, msg, "assistant");
+          await saveChatHistory(userId, msg, "assistant", pageKey);
         }
       }
     } catch (error) {
@@ -1293,6 +1294,9 @@ app.post('/webhook', async (req, res) => {
         }
       }
 
+      // บันทึก/อัปเดตข้อมูลเพจลง MongoDB
+      await ensurePageRecord(pageKey, pageId);
+
       for (const webhookEvent of entry.messaging) {
         if (webhookEvent.delivery || webhookEvent.read) {
           console.log("Skipping delivery/read event");
@@ -1324,13 +1328,13 @@ app.post('/webhook', async (req, res) => {
           if (isEcho) {
             if (textMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
               await setUserStatus(userId, false);
-              await saveChatHistory(userId, textMsg, "assistant");
+              await saveChatHistory(userId, textMsg, "assistant", pageKey);
               await sendSimpleTextMessage(userId, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ", pageKey);
               continue;
             }
             else if (textMsg === "แอดมิน THAYA ยินดีดูแลลูกค้าค่ะ") {
               await setUserStatus(userId, true);
-              await saveChatHistory(userId, textMsg, "assistant");
+              await saveChatHistory(userId, textMsg, "assistant", pageKey);
               await sendSimpleTextMessage(userId, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ", pageKey);
               continue;
             }
@@ -1438,12 +1442,12 @@ app.post('/webhook', async (req, res) => {
                   const action = hasDisableKeyword ? "ปิด" : "เปิด";
                   const confirmMsg = `ระบบได้${action}การส่งข้อความติดตามสำหรับผู้ใช้ ${targetUserId} เรียบร้อยแล้วค่ะ`;
                   await sendSimpleTextMessage(userId, confirmMsg, pageKey);
-                  await saveChatHistory(userId, confirmMsg, "assistant");
+                  await saveChatHistory(userId, confirmMsg, "assistant", pageKey);
                   console.log(`[DEBUG] Successfully ${hasDisableKeyword ? 'disabled' : 'enabled'} followup for targetUserId=${targetUserId}`);
                 } else {
                   const confirmMsg = `ไม่สามารถ${hasDisableKeyword ? 'ปิด' : 'เปิด'}การส่งข้อความติดตามสำหรับผู้ใช้ ${targetUserId} ได้ค่ะ`;
                   await sendSimpleTextMessage(userId, confirmMsg, pageKey);
-                  await saveChatHistory(userId, confirmMsg, "assistant");
+                  await saveChatHistory(userId, confirmMsg, "assistant", pageKey);
                   console.error(`[ERROR] Failed to ${hasDisableKeyword ? 'disable' : 'enable'} followup for targetUserId=${targetUserId}`);
                 }
                 
@@ -1456,7 +1460,7 @@ app.post('/webhook', async (req, res) => {
               if (success) {
                 const confirmMsg = "ระบบได้ปิดการส่งข้อความติดตามสำหรับผู้ใช้นี้แล้วค่ะ";
                 await sendSimpleTextMessage(userId, confirmMsg, pageKey);
-                await saveChatHistory(userId, confirmMsg, "assistant");
+                await saveChatHistory(userId, confirmMsg, "assistant", pageKey);
                 console.log(`[DEBUG] Successfully disabled followup for userId=${userId}`);
               } else {
                 console.error(`[ERROR] Failed to disable followup for userId=${userId}`);
@@ -1468,7 +1472,7 @@ app.post('/webhook', async (req, res) => {
               if (success) {
                 const confirmMsg = "ระบบได้เปิดการส่งข้อความติดตามสำหรับผู้ใช้นี้อีกครั้งแล้วค่ะ";
                 await sendSimpleTextMessage(userId, confirmMsg, pageKey);
-                await saveChatHistory(userId, confirmMsg, "assistant");
+                await saveChatHistory(userId, confirmMsg, "assistant", pageKey);
                 console.log(`[DEBUG] Successfully enabled followup for userId=${userId}`);
               } else {
                 console.error(`[ERROR] Failed to enable followup for userId=${userId}`);
@@ -1482,7 +1486,7 @@ app.post('/webhook', async (req, res) => {
               continue;
             }
 
-            await saveChatHistory(userId, textMsg, "user");
+            await saveChatHistory(userId, textMsg, "user", pageKey);
             // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
             await saveOrderChatHistory(userId, textMsg, "user");
 
@@ -1495,7 +1499,7 @@ app.post('/webhook', async (req, res) => {
             const systemInstructions = buildSystemInstructions();
             const assistantMsg = await getAssistantResponse(systemInstructions, history, textMsg);
 
-            await saveChatHistory(userId, assistantMsg, "assistant");
+            await saveChatHistory(userId, assistantMsg, "assistant", pageKey);
 
             await detectAndSaveOrder(userId, assistantMsg, pageKey);
 
@@ -1545,7 +1549,7 @@ app.post('/webhook', async (req, res) => {
               continue;
             }
 
-            await saveChatHistory(userId, userContentArray, "user");
+            await saveChatHistory(userId, userContentArray, "user", pageKey);
             // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
             await saveOrderChatHistory(userId, userContentArray, "user");
 
@@ -1558,7 +1562,7 @@ app.post('/webhook', async (req, res) => {
             const systemInstructions = buildSystemInstructions();
             const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
 
-            await saveChatHistory(userId, assistantMsg, "assistant");
+            await saveChatHistory(userId, assistantMsg, "assistant", pageKey);
 
             await detectAndSaveOrder(userId, assistantMsg, pageKey);
 
@@ -1725,7 +1729,7 @@ async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
       await sendTextMessage(userId, welcomeMessage, pageKey);
       
       // บันทึกข้อความเริ่มต้นลงในประวัติการสนทนา
-      await saveChatHistory(userId, welcomeMessage, "assistant");
+      await saveChatHistory(userId, welcomeMessage, "assistant", pageKey);
       
       // บันทึกข้อความเริ่มต้นลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
       await saveOrderChatHistory(userId, welcomeMessage, "assistant");
@@ -1739,4 +1743,127 @@ async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
     return false;
   }
 }
+
+// ====================== 2.1) Pages Management ======================
+async function ensurePageRecord(pageKey, pageId = null, pageName = null) {
+  try {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("pages");
+    const update = { updatedAt: new Date() };
+    if (pageId) update.pageId = pageId;
+    if (pageName) update.pageName = pageName;
+    await coll.updateOne(
+      { pageKey },
+      { $setOnInsert: { pageKey, createdAt: new Date() }, $set: update },
+      { upsert: true }
+    );
+  } catch (err) {
+    console.error("ensurePageRecord error:", err);
+  }
+}
+
+// ====================== 12) Dashboard API ======================
+
+// ดึงสถิติจำนวนผู้ใช้และข้อความต่อเพจ
+app.get('/api/stats', async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    let dateFilter = null;
+    if (start || end) {
+      dateFilter = {};
+      if (start) dateFilter.$gte = new Date(start + 'T00:00:00Z');
+      if (end)   dateFilter.$lte = new Date(end + 'T23:59:59Z');
+    }
+    const client = await connectDB();
+    const db = client.db('chatbot');
+    const coll = db.collection('chat_history');
+ 
+    const pipeline = [];
+    if (dateFilter) {
+      pipeline.push({ $match: { timestamp: dateFilter } });
+    }
+    pipeline.push(
+      {
+        $group: {
+          _id: '$pageKey',
+          totalMessages: { $sum: 1 },
+          users: { $addToSet: '$senderId' }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          pageKey: '$_id',
+          totalMessages: 1,
+          uniqueUsers: { $size: '$users' }
+        }
+      },
+      { $sort: { totalMessages: -1 } }
+    );
+ 
+    const stats = await coll.aggregate(pipeline).toArray();
+ 
+    // เติม pageName
+    const pagesColl = db.collection('pages');
+    const pages = await pagesColl.find().toArray();
+    const map = {};
+    pages.forEach(p => { map[p.pageKey] = p.pageName || p.pageKey; });
+ 
+    const result = stats.map(s => ({ ...s, pageName: map[s.pageKey] || s.pageKey }));
+ 
+    res.json({ ok: true, data: result });
+  } catch (err) {
+    console.error('/api/stats error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// อ่านรายชื่อเพจทั้งหมด
+app.get('/api/pages', async (req, res) => {
+  try {
+    const client = await connectDB();
+    const db = client.db('chatbot');
+    const pages = await db.collection('pages').find().toArray();
+    res.json({ ok: true, data: pages });
+  } catch (err) {
+    console.error('/api/pages error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// เพิ่มเพจใหม่
+app.post('/api/pages', async (req, res) => {
+  const { pageKey, pageName } = req.body || {};
+  if (!pageKey) return res.status(400).json({ ok: false, error: 'pageKey required' });
+  try {
+    await ensurePageRecord(pageKey, null, pageName || pageKey);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/pages error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// เปลี่ยนชื่อเพจ
+app.put('/api/pages/:pageKey', async (req, res) => {
+  const { pageKey } = req.params;
+  const { pageName } = req.body || {};
+  if (!pageName) return res.status(400).json({ ok: false, error: 'pageName required' });
+  try {
+    await ensurePageRecord(pageKey, null, pageName);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('PUT /api/pages error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ====================== 13) Static Dashboard ======================
+app.use('/dashboard', express.static(__dirname + '/public'));
+
+// ให้ /dashboard (ไม่มี .html) โหลดหน้า dashboard ทันที
+app.get('/dashboard', (req, res) => {
+  res.sendFile(__dirname + '/public/dashboard.html');
+});
 
