@@ -35,7 +35,8 @@ const PAGE_ACCESS_TOKENS = {
   page10: process.env.PAGE_ACCESS_TOKEN_10, // เพจที่ 10
   page11: process.env.PAGE_ACCESS_TOKEN_11, // เพจที่ 11
   page12: process.env.PAGE_ACCESS_TOKEN_12, // เพจที่ 12
-  page13: process.env.PAGE_ACCESS_TOKEN_13  // เพจที่ 13
+  page13: process.env.PAGE_ACCESS_TOKEN_13,  // เพจที่ 13
+  page14: process.env.PAGE_ACCESS_TOKEN_14,  // เพจที่ 14
 };
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "AiDee_a4wfaw4";
