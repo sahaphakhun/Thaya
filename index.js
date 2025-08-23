@@ -1243,6 +1243,15 @@ function startFollowupScheduler() {
 // ====================== 11) Webhook Routes & Startup ======================
 const processedMessageIds = new Set();
 
+// Health check endpoint สำหรับ Railway
+app.get('/', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    message: 'THAYA Chatbot is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
