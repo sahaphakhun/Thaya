@@ -257,6 +257,42 @@ async function downloadImageAsBase64(url) {
   }
 }
 
+// ตรวจสอบและดาวน์โหลดรูปภาพจาก URL (หากยังไม่เป็น base64)
+async function convertImageUrlsToBase64(content) {
+  if (!Array.isArray(content)) return content;
+
+  const newContent = [];
+  for (const item of content) {
+    if (item.type === 'image_url' && item.image_url && item.image_url.url) {
+      const imageUrl = item.image_url.url;
+      if (/^https?:\/\//i.test(imageUrl)) {
+        try {
+          const base64Url = await downloadImageAsBase64(imageUrl);
+          newContent.push({
+            ...item,
+            image_url: { ...item.image_url, url: base64Url }
+          });
+        } catch (err) {
+          newContent.push({ type: 'text', text: IMAGE_DOWNLOAD_FAIL_PLACEHOLDER });
+        }
+        continue;
+      }
+    }
+    newContent.push(item);
+  }
+  return newContent;
+}
+
+// ทำความสะอาดประวัติแชตและข้อความก่อนส่งให้ OpenAI
+async function sanitizeMessages(messages) {
+  const cleaned = [];
+  for (const msg of messages) {
+    const converted = await convertImageUrlsToBase64(msg.content);
+    cleaned.push({ ...msg, content: converted });
+  }
+  return cleaned;
+}
+
 // เพิ่มฟังก์ชันแปลง timestamp เป็นข้อความไทย
 function formatTimestampThai(dateObj) {
   if (!dateObj) return "";
@@ -641,13 +677,18 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     console.log("[DEBUG] getAssistantResponse => calling GPT (gpt-4o-mini)...");
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+    const cleanedHistory = await sanitizeMessages(history);
+    let finalUserMessage = normalizeRoleContent("user", userContent);
+    finalUserMessage = {
+      ...finalUserMessage,
+      content: await convertImageUrlsToBase64(finalUserMessage.content)
+    };
+
     const messages = [
       { role: "system", content: systemInstructions },
-      ...history
+      ...cleanedHistory,
+      finalUserMessage
     ];
-
-    let finalUserMessage = normalizeRoleContent("user", userContent);
-    messages.push(finalUserMessage);
 
     const response = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
