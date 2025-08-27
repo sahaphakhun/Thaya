@@ -9,7 +9,8 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
-const util = require('util');            
+const axios = require('axios');
+const util = require('util');
 const requestPost = util.promisify(request.post);
 const requestGet = util.promisify(request.get);     
 const { google } = require('googleapis');
@@ -41,6 +42,8 @@ const PAGE_ACCESS_TOKENS = {
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "AiDee_a4wfaw4";
 const MONGO_URI = process.env.MONGO_URI;
+
+const IMAGE_DOWNLOAD_FAIL_PLACEHOLDER = "[ข้อความจากระบบ: ผู้ใช้ส่งรูปภาพมา แต่ไม่สามารถดาวน์โหลดได้ โปรดแจ้งลูกค้าว่ารอแอดมินยืนยันหากเป็นรูปภาพการชำระเงิน หรือแจ้งให้รบกวนพิมพ์ที่อยู่มาหากเป็นรูปภาพที่อยู่ของการจัดส่ง (ถามผู้ใช้หรือวิเคราะห์จากบริบท)]";
 
 // เพิ่มการเก็บข้อมูลเพจ (pageId -> pageName)
 const PAGE_MAPPING = {
@@ -236,13 +239,56 @@ async function saveOrderToDB(orderData, orderID) {
 }
 
 function normalizeRoleContent(role, content) {
-  if (typeof content === "string") {
+  if (typeof content === "string" || Array.isArray(content)) {
     return { role, content };
   }
-  if (Array.isArray(content)) {
-    return { role, content: JSON.stringify(content) };
-  }
   return { role, content: JSON.stringify(content) };
+}
+
+async function downloadImageAsBase64(url) {
+  try {
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    const contentType = response.headers['content-type'] || 'image/jpeg';
+    const base64 = Buffer.from(response.data).toString('base64');
+    return `data:${contentType};base64,${base64}`;
+  } catch (err) {
+    console.error(`[ERROR] downloadImageAsBase64 failed: ${err.message}`);
+    throw err;
+  }
+}
+
+async function ensureBase64Images(content) {
+  if (!Array.isArray(content)) return content;
+
+  const result = [];
+  for (const item of content) {
+    if (item.type === 'image_url') {
+      const url = typeof item.image_url === 'string' ? item.image_url : item.image_url.url;
+      if (url && url.startsWith('http')) {
+        try {
+          const base64Url = await downloadImageAsBase64(url);
+          result.push({
+            type: 'image_url',
+            image_url: {
+              url: base64Url,
+              detail: (item.image_url && item.image_url.detail) || 'auto',
+            }
+          });
+        } catch (err) {
+          result.push({
+            type: 'text',
+            text: IMAGE_DOWNLOAD_FAIL_PLACEHOLDER,
+          });
+        }
+      } else {
+        result.push(item);
+      }
+    } else {
+      result.push(item);
+    }
+  }
+
+  return result;
 }
 
 // เพิ่มฟังก์ชันแปลง timestamp เป็นข้อความไทย
@@ -629,12 +675,23 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
     console.log("[DEBUG] getAssistantResponse => calling GPT (gpt-4o-mini)...");
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+    const sanitizedHistory = [];
+    for (const msg of history) {
+      sanitizedHistory.push({
+        role: msg.role,
+        content: await ensureBase64Images(msg.content)
+      });
+    }
+
     const messages = [
       { role: "system", content: systemInstructions },
-      ...history
+      ...sanitizedHistory
     ];
 
-    let finalUserMessage = normalizeRoleContent("user", userContent);
+    const finalUserMessage = normalizeRoleContent(
+      "user",
+      await ensureBase64Images(userContent)
+    );
     messages.push(finalUserMessage);
 
     const response = await openai.chat.completions.create({
@@ -1524,14 +1581,21 @@ app.post('/webhook', async (req, res) => {
 
             for (const att of attachments) {
               if (att.type === 'image') {
-                userContentArray.push({
-                  type: "image_url",
-                  image_url: {
-                    url: att.payload.url,
-                    // ใส่ detail ได้ตามต้องการ
-                    detail: "auto"  
-                  }
-                });
+                try {
+                  const base64Url = await downloadImageAsBase64(att.payload.url);
+                  userContentArray.push({
+                    type: "image_url",
+                    image_url: {
+                      url: base64Url,
+                      detail: "auto"
+                    }
+                  });
+                } catch (err) {
+                  userContentArray.push({
+                    type: "text",
+                    text: IMAGE_DOWNLOAD_FAIL_PLACEHOLDER
+                  });
+                }
               } else if (att.type === 'video') {
                 userContentArray.push({
                   type: "video_url",
