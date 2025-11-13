@@ -318,21 +318,21 @@ async function getChatHistory(userId) {
     } catch (err) {
       content = ch.content;
     }
-    // แปะเวลาหน้าข้อความ
-    const timeStr = formatTimestampThai(ch.timestamp);
-    let msgWithTime;
-    if (typeof content === "string") {
-      msgWithTime = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content}`;
-    } else if (Array.isArray(content) && content.length > 0 && content[0].text) {
-      // ถ้าเป็น array (เช่น กรณีแนบไฟล์) ให้แปะเวลาที่ text หลัก
-      content = [...content]; // clone เพื่อไม่กระทบต้นฉบับ
-      content[0] = { ...content[0], text: `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content[0].text}` };
-      msgWithTime = content;
-    } else {
-      // หาก content ไม่ใช่ string หรือ array ให้แปลงเป็น string พร้อม timestamp
-      msgWithTime = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${JSON.stringify(content)}`;
+
+    // เพิ่ม timestamp เฉพาะข้อความฝั่งลูกค้า (role === "user")
+    if (ch.role === "user") {
+      const timeStr = formatTimestampThai(ch.timestamp);
+      if (typeof content === "string") {
+        content = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content}`;
+      } else if (Array.isArray(content) && content.length > 0 && content[0].text) {
+        content = [...content];
+        content[0] = { ...content[0], text: `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content[0].text}` };
+      } else {
+        content = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${JSON.stringify(content)}`;
+      }
     }
-    return { role: ch.role, content: msgWithTime };
+
+    return { role: ch.role, content };
   });
 }
 
@@ -1814,4 +1814,3 @@ async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
     return false;
   }
 }
-
