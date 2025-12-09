@@ -1781,7 +1781,7 @@ async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
 [SEND_VIDEO:https://www.dropbox.com/scl/fi/2z9sp3jha5s3nsqw8h11s/1.mp4?rlkey=pvbolh7c5j1n7pxqnyg8jmzyd&e=1&st=a6ddzvzi&dl=1]
 [cut]
 ส่งฟรี มีเก็บเงินปลายทางค่ะ
-[SEND_IMAGE:https://i.postimg.cc/HL1qC59G/727278.png]
+[SEND_IMAGE:https://i.postimg.cc/c49VM7Hk/THAYA-por-rwm-0.jpg]
 [cut]
 ขออนุญาตแนะนำโปรสุดคุ้ม! 
 🦷✨ แพ็คประหยัด THAYA!
