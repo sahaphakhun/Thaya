@@ -12,7 +12,7 @@ const request = require('request');
 const axios = require('axios');
 const util = require('util');
 const requestPost = util.promisify(request.post);
-const requestGet = util.promisify(request.get);     
+const requestGet = util.promisify(request.get);
 const { google } = require('googleapis');
 const { MongoClient } = require('mongodb');
 const { OpenAI } = require('openai');
@@ -65,7 +65,7 @@ const SHEET_RANGE = "ชีต1!A2:B28";  // (ยังคงเดิม ไม
 // ------------------- (C) Google Sheet สำหรับ "บันทึกออเดอร์" (ใหม่) -------------------
 const ORDERS_SPREADSHEET_ID = "1f783DDFR0ZZDM4wG555Zpwmq6tQ2e9tWT28H0qRBPhU";
 const SHEET_NAME_FOR_ORDERS = "บันทึกออเดอร์";
-const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:K`; 
+const ORDERS_RANGE = `${SHEET_NAME_FOR_ORDERS}!A2:K`;
 
 // (NEW) สำหรับ Follow-up - แก้เป็น "A2:B" เพื่อไม่จำกัดจำนวนแถว
 const FOLLOWUP_SHEET_RANGE = "ติดตามลูกค้า!A2:B";
@@ -111,7 +111,7 @@ async function getOrderChatHistory(userId) {
   const db = client.db("chatbot");
   const coll = db.collection("order_chat_history");
   const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
-  
+
   return chats.map(ch => {
     try {
       const parsed = JSON.parse(ch.content);
@@ -127,7 +127,7 @@ async function clearOrderChatHistory(userId) {
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("order_chat_history");
-  
+
   console.log(`[DEBUG] Clearing order chat history for userId=${userId}`);
   await coll.deleteMany({ senderId: userId });
   console.log(`[DEBUG] Cleared order chat history for userId=${userId}`);
@@ -138,16 +138,16 @@ async function saveUserContactInfo(userId, address, phone) {
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("user_contact_info");
-  
+
   console.log(`[DEBUG] Saving user contact info => userId=${userId}`);
   await coll.updateOne(
     { userId },
-    { 
-      $set: { 
+    {
+      $set: {
         address,
         phone,
-        updatedAt: new Date() 
-      } 
+        updatedAt: new Date()
+      }
     },
     { upsert: true }
   );
@@ -159,12 +159,12 @@ async function getUserContactInfo(userId) {
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("user_contact_info");
-  
+
   const info = await coll.findOne({ userId });
   if (!info) {
     return { address: "", phone: "" };
   }
-  
+
   return {
     address: info.address || "",
     phone: info.phone || ""
@@ -186,18 +186,18 @@ async function checkDuplicateOrder(userId, phone, address, promotion) {
     const client = await connectDB();
     const db = client.db("chatbot");
     const coll = db.collection("orders");
-    
+
     // ตรวจสอบว่ามีออเดอร์ที่มีข้อมูลตรงกันในช่วง 24 ชั่วโมงที่ผ่านมาหรือไม่
     const oneDayAgo = new Date();
     oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-    
+
     const existingOrder = await coll.findOne({
       userId: userId,
       phone: phone,
       promotion: promotion,
       createdAt: { $gte: oneDayAgo }
     });
-    
+
     return existingOrder;
   } catch (err) {
     console.error("checkDuplicateOrder error:", err);
@@ -212,7 +212,7 @@ async function saveOrderToDB(orderData, orderID) {
     const client = await connectDB();
     const db = client.db("chatbot");
     const coll = db.collection("orders");
-    
+
     const orderDoc = {
       orderID: orderID,
       userId: orderData.userId,
@@ -228,7 +228,7 @@ async function saveOrderToDB(orderData, orderID) {
       createdAt: new Date(),
       status: "new" // สถานะเริ่มต้นของออเดอร์
     };
-    
+
     await coll.insertOne(orderDoc);
     console.log(`[DEBUG] Order saved to DB: ${orderID}`);
     return true;
@@ -310,7 +310,7 @@ async function getChatHistory(userId) {
   const db = client.db("chatbot");
   const coll = db.collection("chat_history");
   const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
-  
+
   return chats.map(ch => {
     let content;
     try {
@@ -462,11 +462,13 @@ async function updateFollowupData(userId, followupIndex, lastFollowupDate) {
 
     await coll.updateOne(
       { senderId: userId },
-      { $set: { 
-        followupIndex,
-        lastFollowupAt: lastFollowupDate,
-        updatedAt: new Date() 
-      } },
+      {
+        $set: {
+          followupIndex,
+          lastFollowupAt: lastFollowupDate,
+          updatedAt: new Date()
+        }
+      },
       { upsert: true }
     );
   } catch (err) {
@@ -488,11 +490,13 @@ async function disableFollowupForUser(userId) {
 
     const result = await coll.updateOne(
       { senderId: userId },
-      { $set: { 
-        followupDisabled: true,
-        followupDisabledAt: new Date(),
-        updatedAt: new Date() 
-      } },
+      {
+        $set: {
+          followupDisabled: true,
+          followupDisabledAt: new Date(),
+          updatedAt: new Date()
+        }
+      },
       { upsert: true }
     );
 
@@ -531,11 +535,13 @@ async function enableFollowupForUser(userId) {
 
     await coll.updateOne(
       { senderId: userId },
-      { $set: { 
-        followupDisabled: false,
-        followupEnabledAt: new Date(),
-        updatedAt: new Date() 
-      } },
+      {
+        $set: {
+          followupDisabled: false,
+          followupEnabledAt: new Date(),
+          updatedAt: new Date()
+        }
+      },
       { upsert: true }
     );
     return true;
@@ -721,7 +727,7 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
 async function sendSimpleTextMessage(userId, text, pageKey = 'default') {
   console.log(`[DEBUG] Sending text message to userId=${userId}, text="${text}", pageKey=${pageKey}`);
   const accessToken = PAGE_ACCESS_TOKENS[pageKey] || PAGE_ACCESS_TOKENS.default;
-  
+
   const reqBody = {
     recipient: { id: userId },
     message: { text }
@@ -744,7 +750,7 @@ async function sendSimpleTextMessage(userId, text, pageKey = 'default') {
 async function sendImageMessage(userId, imageUrl, pageKey = 'default') {
   console.log(`[DEBUG] Sending image to userId=${userId}, imageUrl=${imageUrl}, pageKey=${pageKey}`);
   const accessToken = PAGE_ACCESS_TOKENS[pageKey] || PAGE_ACCESS_TOKENS.default;
-  
+
   const reqBody = {
     recipient: { id: userId },
     message: {
@@ -772,7 +778,7 @@ async function sendImageMessage(userId, imageUrl, pageKey = 'default') {
 async function sendVideoMessage(userId, videoUrl, pageKey = 'default') {
   console.log(`[DEBUG] Sending video to userId=${userId}, videoUrl=${videoUrl}, pageKey=${pageKey}`);
   const accessToken = PAGE_ACCESS_TOKENS[pageKey] || PAGE_ACCESS_TOKENS.default;
-  
+
   const reqBody = {
     recipient: { id: userId },
     message: {
@@ -797,6 +803,45 @@ async function sendVideoMessage(userId, videoUrl, pageKey = 'default') {
   }
 }
 
+// ====================== Image Manager (รองรับ [IMG:key]) ======================
+let imageManager;
+try {
+  imageManager = require('./imageManager');
+  console.log("[INFO] ImageManager loaded successfully");
+} catch (err) {
+  console.log("[INFO] ImageManager not available, [IMG:key] will not work");
+  imageManager = null;
+}
+
+/**
+ * ส่งรูปภาพจาก key (ใช้กับ [IMG:key])
+ * จะพยายามส่งเป็น attachment_id หรือ URL จาก server
+ */
+async function sendImageFromKey(userId, key, pageKey = 'default') {
+  if (!imageManager) {
+    console.warn(`[WARN] ImageManager not available, cannot send image for key: ${key}`);
+    return false;
+  }
+
+  const imageInfo = imageManager.getImageInfo(key);
+  if (!imageInfo) {
+    console.warn(`[WARN] Image not found for key: ${key}`);
+    return false;
+  }
+
+  // สร้าง URL สำหรับ serve รูปจาก server
+  // ใช้ Railway URL หรือ localhost
+  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : process.env.BASE_URL || 'http://localhost:3001';
+
+  const imageUrl = `${baseUrl}/api/images/${key}/file`;
+  console.log(`[DEBUG] Sending image from key: ${key} => ${imageUrl}`);
+
+  await sendImageMessage(userId, imageUrl, pageKey);
+  return true;
+}
+
 async function sendTextMessage(userId, response, pageKey = 'default') {
   console.log("[DEBUG] sendTextMessage => raw response:", response);
 
@@ -805,20 +850,36 @@ async function sendTextMessage(userId, response, pageKey = 'default') {
   if (segments.length > 10) segments = segments.slice(0, 10);
 
   for (let segment of segments) {
-    const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s]+)\]/g;
-    const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s]+)\]/g;
+    // รูปแบบเดิม: [SEND_IMAGE:https://...]
+    const imageRegex = /\[SEND_IMAGE:(https?:\/\/[^\s\]]+)\]/g;
+    // รูปแบบใหม่: [IMG:key] (ไม่ใช่ URL)
+    const imgKeyRegex = /\[IMG:([a-zA-Z0-9_ก-๙]+)\]/g;
+    // วิดีโอ
+    const videoRegex = /\[SEND_VIDEO:(https?:\/\/[^\s\]]+)\]/g;
 
     const images = [...segment.matchAll(imageRegex)];
+    const imgKeys = [...segment.matchAll(imgKeyRegex)];
     const videos = [...segment.matchAll(videoRegex)];
 
     let textPart = segment
       .replace(imageRegex, '')
+      .replace(imgKeyRegex, '')
       .replace(videoRegex, '')
       .trim();
 
+    // ส่งรูปจาก URL เดิม
     for (const match of images) {
       const imageUrl = match[1];
       await sendImageMessage(userId, imageUrl, pageKey);
+    }
+
+    // ส่งรูปจาก Key ใหม่
+    for (const match of imgKeys) {
+      const key = match[1];
+      const sent = await sendImageFromKey(userId, key, pageKey);
+      if (!sent) {
+        console.warn(`[WARN] Failed to send image for key: ${key}`);
+      }
     }
 
     for (const match of videos) {
@@ -912,14 +973,14 @@ async function extractOrderDataWithGPT(assistantMsg) {
       console.error("JSON parse error, got:", gptAnswer);
       data = { is_found: false, has_confirmation: false };
     }
-    
+
     // เพิ่มการตรวจสอบข้อมูลที่จำเป็นและการยืนยันการสั่งซื้อ
     if (data.is_found) {
       const hasAddress = data.address && data.address.trim() !== "";
       const hasPhone = data.phone && data.phone.trim() !== "";
       const hasPromotion = data.promotion && data.promotion.trim() !== "";
       const hasConfirmation = data.has_confirmation === true;
-      
+
       // ถ้าข้อมูลที่จำเป็นไม่ครบ หรือไม่มีการยืนยันการสั่งซื้อ ให้เปลี่ยน is_found เป็น false
       if (!hasAddress || !hasPhone || !hasPromotion || !hasConfirmation) {
         console.log("[DEBUG] extractOrderDataWithGPT => Required data missing or no confirmation, setting is_found to false");
@@ -927,7 +988,7 @@ async function extractOrderDataWithGPT(assistantMsg) {
         data.is_found = false;
       }
     }
-    
+
     console.log("[DEBUG] extractOrderDataWithGPT => parse result:", data);
     return data;
   } catch (e) {
@@ -940,38 +1001,38 @@ async function extractOrderDataWithGPT(assistantMsg) {
 async function saveOrderToSheet(orderData) {
   try {
     console.log("[DEBUG] saveOrderToSheet => Start saving to Google Sheet...");
-    
+
     // ตรวจสอบข้อมูลที่จำเป็นอีกครั้งก่อนบันทึกลงชีต
     const address = orderData.address || "";
     const phone = orderData.phone || "";
     const promotion = orderData.promotion || "";
     const userId = orderData.userId || "";
-    
+
     // ตรวจสอบว่ามีข้อมูลหรือไม่ (แค่มีก็พอ)
     if (!address.trim() || !phone.trim() || !promotion.trim() || !userId) {
       console.log("[DEBUG] saveOrderToSheet => Missing required data, skipping save");
       console.log(`[DEBUG] Address: "${address}", Phone: "${phone}", Promotion: "${promotion}", UserId: "${userId}"`);
       return false;
     }
-    
+
     // สร้าง orderID
     const orderID = generateOrderID();
-    
+
     // บันทึกลง MongoDB ก่อน
     const savedToDB = await saveOrderToDB({
       ...orderData,
       userId: userId,
       orderID: orderID
     }, orderID);
-    
+
     if (!savedToDB) {
       console.log(`[DEBUG] saveOrderToSheet => Failed to save to DB, skipping sheet save`);
       return false;
     }
-    
+
     // บันทึกข้อมูลที่อยู่และเบอร์โทรของผู้ใช้
     await saveUserContactInfo(userId, address, phone);
-    
+
     const sheetsApi = await getSheetsApi();
 
     const timestamp = new Date().toLocaleString("th-TH");
@@ -1011,11 +1072,11 @@ async function saveOrderToSheet(orderData) {
 
     const result = await sheetsApi.spreadsheets.values.append(request);
     console.log("Order saved to sheet:", result.statusText);
-    
+
     // ลบประวัติการสนทนาของโมเดลบันทึกออเดอร์หลังจากบันทึกสำเร็จ
     await clearOrderChatHistory(userId);
     console.log(`[DEBUG] Cleared order chat history after successful order for userId=${userId}`);
-    
+
     return true;
 
   } catch (err) {
@@ -1031,7 +1092,7 @@ async function detectAndSaveOrder(userId, assistantMsg, pageKey = 'default') {
 
   // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์
   await saveOrderChatHistory(userId, assistantMsg, "assistant");
-  
+
   const parsed = await extractOrderDataWithGPT(assistantMsg);
   if (!parsed.is_found) {
     console.log("[DEBUG] detectAndSaveOrder: No order data found or no confirmation => skip saving");
@@ -1057,16 +1118,16 @@ async function detectAndSaveOrder(userId, assistantMsg, pageKey = 'default') {
   // ตรวจสอบกรณีลูกค้าระบุ "ที่อยู่เดิม" หรือ "เบอร์เดิม"
   if (address.includes("เดิม") || phone.includes("เดิม")) {
     console.log("[DEBUG] detectAndSaveOrder: Customer requested to use previous contact info");
-    
+
     // ดึงข้อมูลที่อยู่และเบอร์โทรเดิมของลูกค้า
     const contactInfo = await getUserContactInfo(userId);
-    
+
     // ถ้ามีข้อมูลเดิม ให้ใช้ข้อมูลเดิมแทน
     if (address.includes("เดิม") && contactInfo.address) {
       parsed.address = contactInfo.address;
       console.log(`[DEBUG] Using previous address: ${parsed.address}`);
     }
-    
+
     if (phone.includes("เดิม") && contactInfo.phone) {
       parsed.phone = contactInfo.phone;
       console.log(`[DEBUG] Using previous phone: ${parsed.phone}`);
@@ -1078,10 +1139,10 @@ async function detectAndSaveOrder(userId, assistantMsg, pageKey = 'default') {
   parsed.page_source = pageKey;
   // เพิ่ม userId เข้าไปใน parsed data
   parsed.userId = userId;
-  
+
   // รับค่าที่ส่งกลับจาก saveOrderToSheet
   const saveSuccess = await saveOrderToSheet(parsed);
-  
+
   // อัปเดตสถานะลูกค้าเฉพาะเมื่อบันทึกออเดอร์สำเร็จเท่านั้น
   if (saveSuccess) {
     console.log("[DEBUG] detectAndSaveOrder: Order saved successfully => updating customer status");
@@ -1103,7 +1164,7 @@ async function analyzeConversationForStatusChange(userId) {
     // ดึงสถานะปัจจุบันก่อน
     const doc = await getCustomerOrderStatus(userId);
     const currentStatus = doc.orderStatus || "pending";
-    
+
     // ตรวจสอบสถานะปัจจุบัน หากเป็นสถานะที่ไม่ควรเปลี่ยนแล้ว ให้ข้ามการวิเคราะห์
     // ยกเว้นกรณีที่เป็น ordered ที่อาจจะอัปเกรดเป็น alreadyPurchased ได้
     if (currentStatus === "ปฏิเสธรับ" || currentStatus === "alreadyPurchased") {
@@ -1166,7 +1227,7 @@ async function analyzeConversationForStatusChange(userId) {
     if (currentStatus === "pending" && newStatus !== "pending") {
       console.log(`[DEBUG] Updating status: ${currentStatus} -> ${newStatus}`);
       await updateCustomerOrderStatus(userId, newStatus);
-    } 
+    }
     else if (currentStatus === "ordered" && newStatus === "alreadyPurchased") {
       console.log(`[DEBUG] Upgrading status: ${currentStatus} -> ${newStatus}`);
       await updateCustomerOrderStatus(userId, "alreadyPurchased");
@@ -1184,14 +1245,14 @@ async function analyzeConversationForStatusChange(userId) {
 function startFollowupScheduler() {
   // เพิ่มตัวแปรเพื่อป้องกันการทำงานซ้อนกัน
   let isRunning = false;
-  
+
   setInterval(async () => {
     // ถ้ากำลังทำงานอยู่ ให้ข้ามรอบนี้ไป
     if (isRunning) {
       console.log("[Scheduler DEBUG] Previous execution still running, skipping this cycle");
       return;
     }
-    
+
     isRunning = true;
     console.log("=== [Scheduler DEBUG] startFollowupScheduler triggered at", new Date().toISOString(), "===");
 
@@ -1219,29 +1280,29 @@ function startFollowupScheduler() {
       }).toArray();
 
       console.log(`[Scheduler DEBUG] Found ${pendingUsers.length} pending user(s) for follow-up check.`);
-      
+
       for (let userDoc of pendingUsers) {
         const userId = userDoc.senderId;
-        
+
         // เช็คสถานะอีกครั้งเพื่อความมั่นใจ (กรณีมีการอัปเดตระหว่างการทำงาน)
         const currentStatus = await getCustomerOrderStatus(userId);
         if (currentStatus.orderStatus !== "pending") {
           console.log(`[Scheduler DEBUG] userId=${userId} - SKIPPED: current status is not pending (${currentStatus.orderStatus})`);
           continue;
         }
-        
+
         // ตรวจสอบ followupDisabled อีกครั้งแบบเจาะจง
         if (currentStatus.followupDisabled === true) {
           console.log(`[Scheduler DEBUG] userId=${userId} - SKIPPED: followup is disabled for this user`);
           continue;
         }
-        
+
         const idx = userDoc.followupIndex || 0;
         const lastFollowupAt = userDoc.lastFollowupAt ? new Date(userDoc.lastFollowupAt) : null;
 
-        const lastReply = userDoc.lastUserReplyAt 
-            ? new Date(userDoc.lastUserReplyAt)
-            : new Date(userDoc.updatedAt);
+        const lastReply = userDoc.lastUserReplyAt
+          ? new Date(userDoc.lastUserReplyAt)
+          : new Date(userDoc.updatedAt);
 
         const requiredMin = followupData[idx].time;
         const diffMs = now - lastReply;
@@ -1252,7 +1313,7 @@ function startFollowupScheduler() {
         // เพิ่มการตรวจสอบว่าเคยส่ง followup ล่าสุดไปเมื่อไหร่
         // ถ้าเคยส่งไปแล้วในช่วง 5 นาทีที่ผ่านมา ให้ข้ามไป
         const shouldSkipDueToRecentFollowup = lastFollowupAt && ((now - lastFollowupAt) / 60000 < 5);
-        
+
         if (shouldSkipDueToRecentFollowup) {
           console.log(`[Scheduler DEBUG] userId=${userId}, followupIndex=${idx} - SKIPPED: recent followup sent less than 5 minutes ago`);
           continue;
@@ -1261,16 +1322,16 @@ function startFollowupScheduler() {
         if (diffMin >= requiredMin) {
           // ส่ง follow-up
           const msg = followupData[idx].message;
-          console.log(`[FOLLOWUP] Sending followup #${idx+1} to userId=${userId}`);
+          console.log(`[FOLLOWUP] Sending followup #${idx + 1} to userId=${userId}`);
 
           // อัปเดต followupIndex ก่อนส่งข้อความ เพื่อป้องกันการส่งซ้ำ
           await updateFollowupData(userId, idx + 1, new Date());
-          
+
           // หา pageKey ที่เหมาะสมสำหรับผู้ใช้นี้
           // ตรวจสอบจากประวัติการสนทนาล่าสุด
           const history = await getChatHistory(userId);
           let pageKey = 'default';
-          
+
           // ถ้ามีประวัติการสนทนา ให้ดูว่าล่าสุดคุยกับเพจไหน
           if (history.length > 0) {
             // ตรวจสอบว่าผู้ใช้นี้เคยคุยกับเพจไหนล่าสุด
@@ -1280,7 +1341,7 @@ function startFollowupScheduler() {
               pageKey = userPageData.pageKey;
             }
           }
-          
+
           await sendTextMessage(userId, msg, pageKey);
           await saveChatHistory(userId, msg, "assistant");
         }
@@ -1298,11 +1359,28 @@ const processedMessageIds = new Set();
 
 // Health check endpoint สำหรับ Railway
 app.get('/', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
+  res.status(200).json({
+    status: 'OK',
     message: 'THAYA Chatbot is running',
     timestamp: new Date().toISOString()
   });
+});
+
+// ====================== Image API (สำหรับ [IMG:key]) ======================
+// serve รูปภาพจาก key
+app.get('/api/images/:key/file', (req, res) => {
+  if (!imageManager) {
+    return res.status(404).send('Image manager not available');
+  }
+
+  const result = imageManager.getImageBuffer(req.params.key);
+  if (!result) {
+    return res.status(404).send('Image not found');
+  }
+
+  res.setHeader('Content-Type', result.mimeType);
+  res.setHeader('Cache-Control', 'public, max-age=31536000');
+  res.send(result.buffer);
 });
 
 app.get('/webhook', (req, res) => {
@@ -1324,7 +1402,7 @@ app.post('/webhook', async (req, res) => {
       }
 
       const pageId = entry.id;
-      
+
       // ตรวจสอบว่าเคยเจอ pageId นี้หรือยัง ถ้ายังให้เก็บไว้ใน PAGE_MAPPING
       let pageKey = 'default';
       if (PAGE_MAPPING[pageId]) {
@@ -1348,7 +1426,7 @@ app.post('/webhook', async (req, res) => {
             }
           }
         }
-        
+
         // ถ้ายังไม่เจอ ให้ใช้ default และบันทึกไว้
         if (!PAGE_MAPPING[pageId]) {
           PAGE_MAPPING[pageId] = pageKey;
@@ -1378,7 +1456,7 @@ app.post('/webhook', async (req, res) => {
 
         // บันทึกข้อมูลการเชื่อมโยงระหว่างผู้ใช้กับเพจ
         await saveUserPageMapping(userId, pageKey);
-        
+
         if (webhookEvent.message) {
           const textMsg = webhookEvent.message.text || "";
           const isEcho = webhookEvent.message.is_echo === true;
@@ -1402,13 +1480,13 @@ app.post('/webhook', async (req, res) => {
               // ในกรณีข้อความ echo จาก messenger 
               // webhookEvent.recipient.id คือ ID ของลูกค้าที่รับข้อความ
               // webhookEvent.sender.id คือ ID ของเพจที่ส่งข้อความ (pageId)
-              
+
               const recipientId = webhookEvent.recipient.id;
               // ใช้ recipientId เป็น targetUserId เพราะเป็น ID ของลูกค้าที่รับข้อความจากแอดมิน
               const targetUserId = recipientId;
 
               console.log(`[DEBUG] Admin command to disable followup for userId=${targetUserId} via #รับออเดอร์ keyword`);
-              
+
               // บันทึกก่อนการปิด followup เพื่อตรวจสอบ
               console.log(`[DEBUG] Webhook event details for #รับออเดอร์:`, {
                 isEcho: isEcho,
@@ -1418,9 +1496,9 @@ app.post('/webhook', async (req, res) => {
                 targetUserId: targetUserId,
                 pageId: pageId
               });
-              
+
               const success = await disableFollowupForUser(targetUserId);
-              
+
               if (success) {
                 console.log(`[DEBUG] Successfully disabled followup for userId=${targetUserId} from admin command #รับออเดอร์`);
               } else {
@@ -1445,58 +1523,58 @@ app.post('/webhook', async (req, res) => {
             // เพิ่มการตรวจสอบข้อความสำหรับปิด followup
             // ตรวจสอบคำสั่งปิด followup จากข้อความผู้ใช้ หรือจากแอดมิน
             const followupDisableKeywords = [
-              'ปิด followup', 'ปิดการติดตาม', 'ไม่ต้องติดตาม', 'ยกเลิกการติดตาม', 
+              'ปิด followup', 'ปิดการติดตาม', 'ไม่ต้องติดตาม', 'ยกเลิกการติดตาม',
               'ยกเลิก followup', 'ไม่ต้องส่ง followup', 'พอแล้ว followup',
               'disable followup', 'stop followup', 'ปิดระบบติดตาม'
             ];
-            
+
             // เพิ่มคำสั่งเปิดใช้งานการติดตาม
             const followupEnableKeywords = [
-              'เปิด followup', 'เปิดการติดตาม', 'ติดตามต่อ', 'เริ่มติดตามใหม่', 
+              'เปิด followup', 'เปิดการติดตาม', 'ติดตามต่อ', 'เริ่มติดตามใหม่',
               'เปิด followup ใหม่', 'ให้ส่ง followup', 'ส่ง followup',
               'enable followup', 'start followup', 'เปิดระบบติดตาม'
             ];
-            
+
             // ตรวจสอบว่าข้อความมีคำสั่งปิด followup หรือไม่
-            const hasDisableKeyword = followupDisableKeywords.some(keyword => 
+            const hasDisableKeyword = followupDisableKeywords.some(keyword =>
               textMsg.toLowerCase().includes(keyword.toLowerCase())
             );
-            
+
             // ตรวจสอบว่าข้อความมีคำสั่งเปิด followup หรือไม่
-            const hasEnableKeyword = followupEnableKeywords.some(keyword => 
+            const hasEnableKeyword = followupEnableKeywords.some(keyword =>
               textMsg.toLowerCase().includes(keyword.toLowerCase())
             );
-            
+
             // ตรวจสอบกรณีแอดมินต้องการปิด/เปิด followup สำหรับผู้ใช้เฉพาะราย
             // รูปแบบ: "ปิด followup ของ 5487841234" หรือ "ปิด followup userId=5487841234"
-            if ((hasDisableKeyword || hasEnableKeyword) && 
-                (textMsg.includes("ของ ") || textMsg.includes("userId="))) {
-              
+            if ((hasDisableKeyword || hasEnableKeyword) &&
+              (textMsg.includes("ของ ") || textMsg.includes("userId="))) {
+
               // ค้นหา userId จากข้อความ
               let targetUserId = null;
-              
+
               // ค้นหาแบบ "ของ 5487841234"
               const matchOfPattern = textMsg.match(/ของ\s+(\d+)/);
               if (matchOfPattern && matchOfPattern[1]) {
                 targetUserId = matchOfPattern[1];
               }
-              
+
               // ค้นหาแบบ "userId=5487841234"
               const matchUserIdPattern = textMsg.match(/userId=(\d+)/);
               if (!targetUserId && matchUserIdPattern && matchUserIdPattern[1]) {
                 targetUserId = matchUserIdPattern[1];
               }
-              
+
               if (targetUserId) {
                 console.log(`[DEBUG] Admin command to ${hasDisableKeyword ? 'disable' : 'enable'} followup for specific userId=${targetUserId}`);
-                
+
                 let success = false;
                 if (hasDisableKeyword) {
                   success = await disableFollowupForUser(targetUserId);
                 } else {
                   success = await enableFollowupForUser(targetUserId);
                 }
-                
+
                 if (success) {
                   const action = hasDisableKeyword ? "ปิด" : "เปิด";
                   const confirmMsg = `ระบบได้${action}การส่งข้อความติดตามสำหรับผู้ใช้ ${targetUserId} เรียบร้อยแล้วค่ะ`;
@@ -1509,13 +1587,13 @@ app.post('/webhook', async (req, res) => {
                   await saveChatHistory(userId, confirmMsg, "assistant");
                   console.error(`[ERROR] Failed to ${hasDisableKeyword ? 'disable' : 'enable'} followup for targetUserId=${targetUserId}`);
                 }
-                
+
                 // ดำเนินการต่อกับข้อความนี้ตามปกติ
               }
             } else if (hasDisableKeyword) {
               console.log(`[DEBUG] Detected followup disable command from userId=${userId}, text="${textMsg}"`);
               const success = await disableFollowupForUser(userId);
-              
+
               if (success) {
                 const confirmMsg = "ระบบได้ปิดการส่งข้อความติดตามสำหรับผู้ใช้นี้แล้วค่ะ";
                 await sendSimpleTextMessage(userId, confirmMsg, pageKey);
@@ -1527,7 +1605,7 @@ app.post('/webhook', async (req, res) => {
             } else if (hasEnableKeyword) {
               console.log(`[DEBUG] Detected followup enable command from userId=${userId}, text="${textMsg}"`);
               const success = await enableFollowupForUser(userId);
-              
+
               if (success) {
                 const confirmMsg = "ระบบได้เปิดการส่งข้อความติดตามสำหรับผู้ใช้นี้อีกครั้งแล้วค่ะ";
                 await sendSimpleTextMessage(userId, confirmMsg, pageKey);
@@ -1694,24 +1772,24 @@ function isValidThaiPhoneNumber(phone) {
   if (!phone || typeof phone !== 'string') {
     return false;
   }
-  
+
   // ลบช่องว่างและอักขระพิเศษออก
   const cleanedPhone = phone.replace(/[\s\-\(\)\+\.]/g, '');
-  
+
   // ถ้าไม่มีตัวเลขเลย ถือว่าไม่ใช่เบอร์โทร
   if (!/\d/.test(cleanedPhone)) {
     return false;
   }
-  
+
   // ตรวจสอบว่ามีตัวอักษรหรือไม่ (ถ้ามีตัวอักษรมากเกินไป อาจไม่ใช่เบอร์โทร)
   const letterCount = (cleanedPhone.match(/[a-zA-Z]/g) || []).length;
   if (letterCount > 2) { // อนุญาตให้มีตัวอักษรได้บ้าง (อาจเป็นการพิมพ์ผิด)
     return false;
   }
-  
+
   // ดึงเฉพาะตัวเลขออกมา
   const digitsOnly = cleanedPhone.replace(/\D/g, '');
-  
+
   // ตรวจสอบความยาวของเบอร์โทร
   // เบอร์มือถือไทยปกติมี 10 หลัก (0ตามด้วย 9 หลัก)
   // หรือบางครั้งอาจมี 9 หลัก (ไม่มี 0 นำหน้า)
@@ -1719,12 +1797,12 @@ function isValidThaiPhoneNumber(phone) {
   if (digitsOnly.length < 8 || digitsOnly.length > 10) {
     return false;
   }
-  
+
   // ถ้าเป็นเบอร์ 10 หลัก ต้องขึ้นต้นด้วย 0
   if (digitsOnly.length === 10 && !digitsOnly.startsWith('0')) {
     return false;
   }
-  
+
   // ถ้าเป็นเบอร์ 9 หลัก ต้องขึ้นต้นด้วย 6, 8, 9 (เบอร์มือถือทั่วไป)
   if (digitsOnly.length === 9 && !/^[689]/.test(digitsOnly)) {
     // แต่ถ้าเป็นเบอร์ที่ขึ้นต้นด้วย 2 (เบอร์บ้านกรุงเทพฯ) ก็ให้ผ่าน
@@ -1732,7 +1810,7 @@ function isValidThaiPhoneNumber(phone) {
       return false;
     }
   }
-  
+
   return true;
 }
 
@@ -1745,13 +1823,13 @@ async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
     const client = await connectDB();
     const db = client.db("chatbot");
     const coll = db.collection("chat_history");
-    
+
     // ตรวจสอบว่ามีประวัติการสนทนาหรือไม่
     const chatCount = await coll.countDocuments({ senderId: userId });
-    
+
     if (chatCount === 0) {
       console.log(`[DEBUG] New user detected: ${userId}. Sending welcome message...`);
-      
+
       // ข้อความเริ่มต้นที่กำหนด
       const welcomeMessage = `ยาสีฟันสูตรสมุนไพรพรีเมี่ยม
 สามารถใช้ได้ทั้งครอบครัว
@@ -1795,19 +1873,19 @@ async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
 [SEND_IMAGE:https://i.postimg.cc/YSdDJhjB/por650.jpg]
 [cut]
 สนใจรับโปรไหนดีคะ แจ้งแอดมินได้เลยค่ะ`;
-      
+
       // ส่งข้อความเริ่มต้น
       await sendTextMessage(userId, welcomeMessage, pageKey);
-      
+
       // บันทึกข้อความเริ่มต้นลงในประวัติการสนทนา
       await saveChatHistory(userId, welcomeMessage, "assistant");
-      
+
       // บันทึกข้อความเริ่มต้นลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
       await saveOrderChatHistory(userId, welcomeMessage, "assistant");
-      
+
       return true;
     }
-    
+
     return false;
   } catch (error) {
     console.error(`[ERROR] Failed to check and send welcome message: ${error.message}`);

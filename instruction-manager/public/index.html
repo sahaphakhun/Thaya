@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>THAYA Instruction Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">📋</span>
+                    <h1>THAYA</h1>
+                </div>
+                <p class="subtitle">Instruction Manager</p>
+            </div>
+
+            <nav class="sidebar-nav">
+                <button class="nav-item active" data-view="dashboard">
+                    <span class="nav-icon">🏠</span>
+                    <span>แดชบอร์ด</span>
+                </button>
+                <button class="nav-item" data-view="versions">
+                    <span class="nav-icon">📁</span>
+                    <span>เวอร์ชันทั้งหมด</span>
+                </button>
+                <button class="nav-item" data-view="editor">
+                    <span class="nav-icon">✏️</span>
+                    <span>แก้ไข</span>
+                </button>
+                <button class="nav-item" data-view="preview">
+                    <span class="nav-icon">👁️</span>
+                    <span>ดูตัวอย่าง</span>
+                </button>
+                <a href="/images.html" class="nav-item" style="text-decoration: none;">
+                    <span class="nav-icon">🖼️</span>
+                    <span>จัดการรูปภาพ</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button class="btn btn-primary btn-block" id="newVersionBtn">
+                    <span>+ สร้างเวอร์ชันใหม่</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard View -->
+            <section class="view active" id="dashboardView">
+                <header class="view-header">
+                    <h2>แดชบอร์ด</h2>
+                    <p>ภาพรวมของ Instructions ทั้งหมด</p>
+                </header>
+
+                <div class="dashboard-grid">
+                    <!-- Default Card -->
+                    <div class="card card-highlight">
+                        <div class="card-header">
+                            <h3>🌐 ค่าเริ่มต้น (จาก Google)</h3>
+                            <span class="badge badge-info">Read Only</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="stats-grid">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="defaultTokens">-</span>
+                                    <span class="stat-label">Tokens โดยประมาณ</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="defaultCost">-</span>
+                                    <span class="stat-label">$/Request</span>
+                                </div>
+                            </div>
+                            <div class="card-actions">
+                                <button class="btn btn-outline" id="viewDefaultBtn">ดูรายละเอียด</button>
+                                <button class="btn btn-primary" id="duplicateDefaultBtn">📋 ทำสำเนา</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Active Version Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>✅ เวอร์ชันที่ใช้งาน</h3>
+                            <span class="badge badge-success" id="activeVersionBadge">ไม่มี</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="stats-grid">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="activeTokens">-</span>
+                                    <span class="stat-label">Tokens โดยประมาณ</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="activeSavings">-</span>
+                                    <span class="stat-label">ประหยัด</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stats Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>📊 สถิติ</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="stats-grid">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="totalVersions">0</span>
+                                    <span class="stat-label">เวอร์ชันทั้งหมด</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="lastUpdated">-</span>
+                                    <span class="stat-label">อัปเดตล่าสุด</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>⚡ การดำเนินการด่วน</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="quick-actions">
+                            <button class="quick-action" id="refreshDefaultBtn">
+                                <span class="quick-icon">🔄</span>
+                                <span>รีเฟรชจาก Google</span>
+                            </button>
+                            <button class="quick-action" id="importBtn">
+                                <span class="quick-icon">📥</span>
+                                <span>นำเข้า JSON</span>
+                            </button>
+                            <button class="quick-action" id="compareBtn">
+                                <span class="quick-icon">🔍</span>
+                                <span>เปรียบเทียบเวอร์ชัน</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Versions List View -->
+            <section class="view" id="versionsView">
+                <header class="view-header">
+                    <h2>เวอร์ชันทั้งหมด</h2>
+                    <div class="header-actions">
+                        <input type="text" class="search-input" placeholder="🔍 ค้นหาเวอร์ชัน..." id="searchVersions">
+                    </div>
+                </header>
+
+                <div class="versions-list" id="versionsList">
+                    <!-- Versions will be loaded here -->
+                </div>
+            </section>
+
+            <!-- Editor View -->
+            <section class="view" id="editorView">
+                <header class="view-header">
+                    <h2>แก้ไข Instructions</h2>
+                    <div class="header-actions">
+                        <select id="versionSelect" class="select-input">
+                            <option value="">-- เลือกเวอร์ชัน --</option>
+                        </select>
+                        <button class="btn btn-success" id="saveVersionBtn">💾 บันทึก</button>
+                    </div>
+                </header>
+
+                <div class="editor-container">
+                    <!-- Version Info -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>📝 ข้อมูลเวอร์ชัน</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>ชื่อเวอร์ชัน</label>
+                                    <input type="text" id="versionName" class="form-input"
+                                        placeholder="เช่น Version 2 - Optimized">
+                                </div>
+                                <div class="form-group">
+                                    <label>คำอธิบาย</label>
+                                    <input type="text" id="versionDesc" class="form-input" placeholder="คำอธิบายสั้นๆ">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Google Doc Section -->
+                    <div class="card">
+                        <div class="card-header collapsible" data-target="googleDocEditor">
+                            <h3>📄 Google Doc Instructions</h3>
+                            <span class="token-count" id="googleDocTokens">0 tokens</span>
+                        </div>
+                        <div class="card-body" id="googleDocEditor">
+                            <textarea id="googleDocContent" class="code-editor" rows="10"
+                                placeholder="เนื้อหาจาก Google Doc..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Sheet Data Section -->
+                    <div class="card">
+                        <div class="card-header collapsible" data-target="sheetDataEditor">
+                            <h3>📊 Sheet Data (ตาราง)</h3>
+                            <div class="header-tools">
+                                <span class="token-count" id="sheetDataTokens">0 tokens</span>
+                                <button class="btn btn-sm btn-outline" id="toggleTableView">🔄 สลับมุมมอง</button>
+                            </div>
+                        </div>
+                        <div class="card-body" id="sheetDataEditor">
+                            <div class="table-view active" id="tableViewContainer">
+                                <div class="table-wrapper">
+                                    <table class="data-table" id="sheetTable">
+                                        <thead>
+                                            <tr>
+                                                <th>ขั้นตอน/กฏ</th>
+                                                <th>รายละเอียด</th>
+                                                <th>การดำเนินการ</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="sheetTableBody">
+                                            <!-- Table rows will be loaded here -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <button class="btn btn-outline btn-block" id="addRowBtn">+ เพิ่มแถว</button>
+                            </div>
+                            <div class="json-view" id="jsonViewContainer">
+                                <textarea id="sheetDataJSON" class="code-editor" rows="15"
+                                    placeholder="JSON data..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Static Instructions Section -->
+                    <div class="card">
+                        <div class="card-header collapsible" data-target="staticEditor">
+                            <h3>📌 Static Instructions</h3>
+                            <span class="token-count" id="staticTokens">0 tokens</span>
+                        </div>
+                        <div class="card-body" id="staticEditor">
+                            <textarea id="staticContent" class="code-editor" rows="6"
+                                placeholder="คำสั่งเพิ่มเติมที่ต้องการใส่ท้าย..."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Preview View -->
+            <section class="view" id="previewView">
+                <header class="view-header">
+                    <h2>ดูตัวอย่าง & Export</h2>
+                    <div class="header-actions">
+                        <select id="previewVersionSelect" class="select-input">
+                            <option value="default">📌 ค่าเริ่มต้น (Google)</option>
+                        </select>
+                        <select id="formatSelect" class="select-input">
+                            <option value="pretty">Pretty JSON</option>
+                            <option value="compact">Compact JSON</option>
+                        </select>
+                        <button class="btn btn-primary" id="buildBtn">🔧 Build</button>
+                    </div>
+                </header>
+
+                <div class="preview-container">
+                    <!-- Stats Panel -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>📈 สถิติ</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="stats-grid cols-4">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="previewTotalTokens">-</span>
+                                    <span class="stat-label">Total Tokens</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="previewGoogleDocTokens">-</span>
+                                    <span class="stat-label">Google Doc</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="previewSheetTokens">-</span>
+                                    <span class="stat-label">Sheet Data</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="previewCost">-</span>
+                                    <span class="stat-label">$/Request</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Output -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>📤 Output</h3>
+                            <div class="header-tools">
+                                <button class="btn btn-sm btn-outline" id="copyOutputBtn">📋 Copy</button>
+                                <button class="btn btn-sm btn-outline" id="downloadOutputBtn">💾 Download</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <pre class="output-preview" id="outputPreview">คลิก "Build" เพื่อสร้าง Instructions</pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal" id="modal">
+            <div class="modal-header">
+                <h3 id="modalTitle">Modal Title</h3>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Modal content here -->
+            </div>
+            <div class="modal-footer" id="modalFooter">
+                <button class="btn btn-outline" id="modalCancel">ยกเลิก</button>
+                <button class="btn btn-primary" id="modalConfirm">ยืนยัน</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
