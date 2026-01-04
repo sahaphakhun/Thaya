@@ -4,158 +4,246 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Image Manager - จัดการรูปภาพสำหรับ THAYA AI Chatbot">
     <title>Image Manager - THAYA</title>
+
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+
+    <!-- Styles -->
     <link rel="stylesheet" href="styles.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖼️</text></svg>">
+
     <style>
+        /* Page-specific styles for Image Manager */
+        .page-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 32px 40px;
+            min-height: 100vh;
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            margin-bottom: 20px;
+            padding: 10px 16px;
+            border-radius: var(--radius-md);
+            font-weight: 500;
+            transition: all var(--transition-fast);
+            background: var(--bg-white);
+            border: 1px solid var(--border-color);
+        }
+
+        .back-link:hover {
+            color: var(--primary);
+            border-color: var(--primary);
+            transform: translateX(-4px);
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* Images Grid */
         .images-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 24px;
         }
 
         .image-card {
             background: var(--bg-card);
-            border: 1px solid var(--border-color);
+            border: 1.5px solid var(--border-color);
             border-radius: var(--radius-lg);
             overflow: hidden;
             transition: all var(--transition-normal);
+            box-shadow: var(--shadow-card);
         }
 
         .image-card:hover {
             border-color: var(--primary);
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-lg);
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-card-hover);
         }
 
         .image-preview {
             width: 100%;
-            height: 160px;
+            height: 180px;
             object-fit: cover;
-            background: var(--bg-darker);
+            background: linear-gradient(135deg, var(--bg-input) 0%, var(--bg-body) 100%);
+            border-bottom: 1px solid var(--border-light);
         }
 
         .image-card-body {
-            padding: 16px;
+            padding: 20px;
         }
 
         .image-key {
             display: flex;
             align-items: center;
-            gap: 8px;
-            background: var(--bg-dark);
-            padding: 8px 12px;
+            justify-content: space-between;
+            gap: 10px;
+            background: var(--bg-input);
+            padding: 10px 14px;
             border-radius: var(--radius-sm);
-            font-family: monospace;
-            font-size: 13px;
+            font-family: 'SF Mono', monospace;
+            font-size: 12px;
             color: var(--success);
-            margin-bottom: 12px;
+            margin-bottom: 14px;
+            border: 1px solid var(--border-color);
+        }
+
+        .image-key code {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .image-key button {
-            background: none;
-            border: none;
+            background: var(--bg-white);
+            border: 1px solid var(--border-color);
             cursor: pointer;
             font-size: 14px;
-            padding: 0;
+            padding: 6px 10px;
+            border-radius: var(--radius-sm);
+            transition: all var(--transition-fast);
+        }
+
+        .image-key button:hover {
+            background: var(--primary-50);
+            border-color: var(--primary);
         }
 
         .image-name {
-            font-weight: 600;
+            font-weight: 700;
+            font-size: 15px;
             color: var(--text-primary);
-            margin-bottom: 4px;
+            margin-bottom: 6px;
         }
 
         .image-meta {
-            font-size: 12px;
+            font-size: 13px;
             color: var(--text-muted);
         }
 
         .image-actions {
             display: flex;
-            gap: 8px;
-            margin-top: 12px;
+            gap: 10px;
+            margin-top: 16px;
         }
 
+        .image-actions .btn {
+            flex: 1;
+        }
+
+        /* Upload Zone */
         .upload-zone {
             border: 2px dashed var(--border-color);
             border-radius: var(--radius-lg);
-            padding: 40px;
+            padding: 60px 40px;
             text-align: center;
             cursor: pointer;
-            transition: all var(--transition-fast);
-            background: var(--bg-dark);
+            transition: all var(--transition-normal);
+            background: linear-gradient(135deg, var(--bg-white) 0%, var(--bg-input) 100%);
         }
 
         .upload-zone:hover,
         .upload-zone.dragover {
             border-color: var(--primary);
-            background: rgba(99, 102, 241, 0.1);
+            background: linear-gradient(135deg, var(--primary-50) 0%, var(--bg-white) 100%);
+            transform: scale(1.01);
         }
 
         .upload-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
+            font-size: 64px;
+            margin-bottom: 20px;
+            display: block;
         }
 
         .upload-text {
             color: var(--text-secondary);
+            font-size: 15px;
         }
 
         .upload-text strong {
-            color: var(--primary-light);
+            color: var(--primary);
+            font-weight: 600;
         }
 
+        .upload-hint {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-top: 12px;
+        }
+
+        /* Import Form */
         .import-form {
             display: flex;
             flex-direction: column;
-            gap: 16px;
-            padding: 20px;
-            background: var(--bg-dark);
+            gap: 20px;
+            padding: 24px;
+            background: var(--bg-input);
             border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
         }
 
         .import-form .form-row {
             display: grid;
-            grid-template-columns: 1fr 150px 150px auto;
-            gap: 12px;
+            grid-template-columns: 1fr 160px 160px auto;
+            gap: 16px;
             align-items: end;
         }
 
+        /* Category Filter */
         .category-filter {
             display: flex;
-            gap: 8px;
-            margin-bottom: 20px;
+            gap: 10px;
+            margin-bottom: 24px;
             flex-wrap: wrap;
         }
 
         .filter-btn {
-            padding: 8px 16px;
-            border-radius: 20px;
-            border: 1px solid var(--border-color);
-            background: transparent;
+            padding: 10px 20px;
+            border-radius: var(--radius-full);
+            border: 1.5px solid var(--border-color);
+            background: var(--bg-white);
             color: var(--text-secondary);
             cursor: pointer;
             transition: all var(--transition-fast);
             font-size: 13px;
+            font-weight: 500;
         }
 
-        .filter-btn:hover,
-        .filter-btn.active {
-            background: var(--primary);
+        .filter-btn:hover {
             border-color: var(--primary);
-            color: white;
+            color: var(--primary);
         }
 
+        .filter-btn.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            border-color: transparent;
+            color: white;
+            box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.4);
+        }
+
+        /* Stats Bar */
         .stats-bar {
             display: flex;
-            gap: 24px;
-            padding: 16px 20px;
+            gap: 32px;
+            padding: 20px 28px;
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            margin-bottom: 20px;
+            border-radius: var(--radius-lg);
+            margin-bottom: 28px;
+            box-shadow: var(--shadow-card);
         }
 
         .stats-bar .stat {
@@ -164,303 +252,451 @@
         }
 
         .stats-bar .stat-value {
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--primary-light);
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--primary);
+            letter-spacing: -0.5px;
         }
 
         .stats-bar .stat-label {
             font-size: 12px;
             color: var(--text-muted);
+            font-weight: 500;
+            margin-top: 4px;
         }
 
-        .back-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            color: var(--text-secondary);
-            text-decoration: none;
-            margin-bottom: 16px;
-            transition: color var(--transition-fast);
-        }
-
-        .back-link:hover {
-            color: var(--primary-light);
-        }
-
+        /* Tabs */
         .tabs {
             display: flex;
-            gap: 4px;
-            margin-bottom: 20px;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 4px;
+            gap: 8px;
+            margin-bottom: 28px;
+            padding: 6px;
+            background: var(--bg-input);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
         }
 
         .tab-btn {
-            padding: 12px 24px;
+            padding: 14px 28px;
             border: none;
             background: transparent;
             color: var(--text-secondary);
             cursor: pointer;
             font-size: 14px;
-            font-weight: 500;
-            border-bottom: 2px solid transparent;
+            font-weight: 600;
+            border-radius: var(--radius-md);
             transition: all var(--transition-fast);
         }
 
         .tab-btn:hover {
             color: var(--text-primary);
+            background: var(--bg-white);
         }
 
         .tab-btn.active {
-            color: var(--primary-light);
-            border-bottom-color: var(--primary);
+            color: white;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.4);
         }
 
         .tab-content {
             display: none;
+            animation: fadeSlideIn 0.4s ease;
         }
 
         .tab-content.active {
             display: block;
         }
 
+        /* Bulk Import */
         .bulk-import-list {
             display: flex;
             flex-direction: column;
-            gap: 8px;
-            max-height: 400px;
+            gap: 12px;
+            max-height: 450px;
             overflow-y: auto;
+            padding-right: 8px;
         }
 
         .bulk-import-item {
             display: grid;
-            grid-template-columns: 1fr 180px 120px 40px;
-            gap: 8px;
-            padding: 12px;
+            grid-template-columns: 1fr 200px 140px 44px;
+            gap: 12px;
+            padding: 16px;
             background: var(--bg-card);
-            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
             align-items: center;
+            transition: all var(--transition-fast);
         }
 
-        .bulk-import-item input {
-            padding: 8px 12px;
+        .bulk-import-item:hover {
+            border-color: var(--primary-100);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .bulk-import-item input,
+        .bulk-import-item select {
+            padding: 10px 14px;
             background: var(--bg-input);
-            border: 1px solid var(--border-color);
+            border: 1.5px solid var(--border-color);
             border-radius: var(--radius-sm);
             color: var(--text-primary);
             font-size: 13px;
+            transition: all var(--transition-fast);
+        }
+
+        .bulk-import-item input:focus,
+        .bulk-import-item select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-50);
+        }
+
+        /* Usage Guide */
+        .usage-guide {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+        }
+
+        .guide-item {
+            padding: 24px;
+            background: var(--bg-input);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            transition: all var(--transition-fast);
+        }
+
+        .guide-item:hover {
+            background: var(--bg-white);
+            border-color: var(--border-color);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .guide-item h4 {
+            color: var(--primary);
+            margin-bottom: 10px;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .guide-item p {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        .guide-item code {
+            background: var(--bg-body);
+            padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            font-family: 'SF Mono', monospace;
+            font-size: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .guide-item code.highlight {
+            color: var(--success);
+            background: var(--success-50);
+            border-color: transparent;
+        }
+
+        /* Upload Preview */
+        .upload-preview {
+            margin-top: 28px;
+            padding: 28px;
+            background: var(--bg-input);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
+        }
+
+        .upload-preview img {
+            max-width: 300px;
+            border-radius: var(--radius-md);
+            margin-bottom: 20px;
+            box-shadow: var(--shadow-md);
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 80px 40px;
+            background: var(--bg-white);
+            border-radius: var(--radius-lg);
+            border: 2px dashed var(--border-color);
+        }
+
+        .empty-state-icon {
+            font-size: 72px;
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        .empty-state p {
+            color: var(--text-muted);
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .bulk-import-item {
+                grid-template-columns: 1fr;
+            }
+
+            .import-form .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .page-container {
+                padding: 20px 16px;
+            }
+
+            .images-grid {
+                grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            }
+
+            .stats-bar {
+                flex-wrap: wrap;
+                gap: 20px;
+            }
+
+            .tabs {
+                flex-wrap: wrap;
+            }
+
+            .tab-btn {
+                flex: 1;
+                text-align: center;
+                min-width: 120px;
+            }
         }
     </style>
 </head>
 
 <body>
-    <div class="app-container" style="display: block; margin-left: 0;">
-        <main class="main-content" style="margin-left: 0; max-width: 1400px; margin: 0 auto;">
-            <a href="index.html" class="back-link">← กลับหน้าหลัก</a>
+    <div class="page-container">
+        <a href="index.html" class="back-link">
+            <span>←</span>
+            <span>กลับหน้าหลัก</span>
+        </a>
 
-            <header class="view-header">
-                <div>
-                    <h2>🖼️ Image Manager</h2>
-                    <p>จัดการรูปภาพสำหรับ Instructions (ใช้ Key อ้างอิงแทน URL)</p>
-                </div>
-            </header>
+        <header class="view-header">
+            <div>
+                <h2>🖼️ Image Manager</h2>
+                <p>จัดการรูปภาพสำหรับ Instructions (ใช้ Key อ้างอิงแทน URL)</p>
+            </div>
+        </header>
 
-            <!-- Stats Bar -->
-            <div class="stats-bar" id="statsBar">
-                <div class="stat">
-                    <span class="stat-value" id="totalImages">0</span>
-                    <span class="stat-label">รูปภาพทั้งหมด</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-value" id="totalSize">0 KB</span>
-                    <span class="stat-label">ขนาดรวม</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-value" id="totalCategories">0</span>
-                    <span class="stat-label">หมวดหมู่</span>
-                </div>
+        <!-- Stats Bar -->
+        <div class="stats-bar" id="statsBar">
+            <div class="stat">
+                <span class="stat-value" id="totalImages">0</span>
+                <span class="stat-label">รูปภาพทั้งหมด</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="totalSize">0 KB</span>
+                <span class="stat-label">ขนาดรวม</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="totalCategories">0</span>
+                <span class="stat-label">หมวดหมู่</span>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="gallery">🖼️ Gallery</button>
+            <button class="tab-btn" data-tab="upload">📤 อัปโหลด</button>
+            <button class="tab-btn" data-tab="import">🔗 นำเข้าจาก URL</button>
+            <button class="tab-btn" data-tab="bulk">📦 นำเข้าหลายรูป</button>
+        </div>
+
+        <!-- Gallery Tab -->
+        <div class="tab-content active" id="galleryTab">
+            <div class="category-filter" id="categoryFilter">
+                <button class="filter-btn active" data-category="all">ทั้งหมด</button>
             </div>
 
-            <!-- Tabs -->
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="gallery">🖼️ Gallery</button>
-                <button class="tab-btn" data-tab="upload">📤 อัปโหลด</button>
-                <button class="tab-btn" data-tab="import">🔗 นำเข้าจาก URL</button>
-                <button class="tab-btn" data-tab="bulk">📦 นำเข้าหลายรูป</button>
-            </div>
-
-            <!-- Gallery Tab -->
-            <div class="tab-content active" id="galleryTab">
-                <div class="category-filter" id="categoryFilter">
-                    <button class="filter-btn active" data-category="all">ทั้งหมด</button>
-                </div>
-
-                <div class="images-grid" id="imagesGrid">
-                    <div class="card" style="grid-column: 1 / -1; text-align: center; padding: 40px;">
-                        <p style="color: var(--text-muted);">กำลังโหลดรูปภาพ...</p>
-                    </div>
+            <div class="images-grid" id="imagesGrid">
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                    <span class="empty-state-icon">🖼️</span>
+                    <p>กำลังโหลดรูปภาพ...</p>
                 </div>
             </div>
+        </div>
 
-            <!-- Upload Tab -->
-            <div class="tab-content" id="uploadTab">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>📤 อัปโหลดรูปภาพ</h3>
-                    </div>
-                    <div class="card-body">
-                        <div class="upload-zone" id="uploadZone">
-                            <div class="upload-icon">📁</div>
-                            <p class="upload-text">
-                                <strong>คลิกเพื่อเลือกไฟล์</strong> หรือลากไฟล์มาวางที่นี่
-                            </p>
-                            <p class="upload-text" style="font-size: 12px; margin-top: 8px;">
-                                รองรับ: JPG, PNG, GIF, WebP (สูงสุด 5MB)
-                            </p>
-                            <input type="file" id="fileInput" accept="image/*" style="display: none;">
-                        </div>
-
-                        <div id="uploadPreview" style="display: none; margin-top: 20px;">
-                            <div class="form-row" style="margin-bottom: 16px;">
-                                <div class="form-group">
-                                    <label>Key (สำหรับอ้างอิง)</label>
-                                    <input type="text" id="uploadKey" class="form-input" placeholder="เช่น product_1">
-                                </div>
-                                <div class="form-group">
-                                    <label>ชื่อรูปภาพ</label>
-                                    <input type="text" id="uploadName" class="form-input"
-                                        placeholder="เช่น รูปสินค้า 1">
-                                </div>
-                                <div class="form-group">
-                                    <label>หมวดหมู่</label>
-                                    <select id="uploadCategory" class="select-input">
-                                        <option value="product">สินค้า</option>
-                                        <option value="promotion">โปรโมชัน</option>
-                                        <option value="qrcode">QR Code</option>
-                                        <option value="review">รีวิว</option>
-                                        <option value="banner">Banner</option>
-                                        <option value="general">ทั่วไป</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <img id="previewImage" style="max-width: 300px; border-radius: 8px; margin-bottom: 16px;">
-                            <div>
-                                <button class="btn btn-primary" id="confirmUploadBtn">💾 บันทึกรูปภาพ</button>
-                                <button class="btn btn-outline" id="cancelUploadBtn">ยกเลิก</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Import from URL Tab -->
-            <div class="tab-content" id="importTab">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>🔗 นำเข้าจาก URL</h3>
-                    </div>
-                    <div class="card-body">
-                        <div class="import-form">
-                            <div class="form-group">
-                                <label>URL ของรูปภาพ</label>
-                                <input type="text" id="importUrl" class="form-input"
-                                    placeholder="https://example.com/image.jpg">
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>Key</label>
-                                    <input type="text" id="importKey" class="form-input" placeholder="product_1">
-                                </div>
-                                <div class="form-group">
-                                    <label>ชื่อ</label>
-                                    <input type="text" id="importName" class="form-input" placeholder="รูปสินค้า 1">
-                                </div>
-                                <div class="form-group">
-                                    <label>หมวดหมู่</label>
-                                    <select id="importCategory" class="select-input">
-                                        <option value="product">สินค้า</option>
-                                        <option value="promotion">โปรโมชัน</option>
-                                        <option value="qrcode">QR Code</option>
-                                        <option value="review">รีวิว</option>
-                                        <option value="banner">Banner</option>
-                                        <option value="imported">นำเข้า</option>
-                                    </select>
-                                </div>
-                                <button class="btn btn-primary" id="importUrlBtn">📥 นำเข้า</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Bulk Import Tab -->
-            <div class="tab-content" id="bulkTab">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>📦 นำเข้าหลายรูปจาก URLs ปัจจุบัน</h3>
-                        <button class="btn btn-outline" id="autoDetectBtn">🔍 ตรวจจับอัตโนมัติ</button>
-                    </div>
-                    <div class="card-body">
-                        <p style="color: var(--text-muted); margin-bottom: 16px;">
-                            เพิ่ม URL และ Key สำหรับแต่ละรูปภาพ หรือคลิก "ตรวจจับอัตโนมัติ" เพื่อดึง URLs จาก
-                            Instructions
-                        </p>
-
-                        <div class="bulk-import-list" id="bulkImportList">
-                            <!-- Items will be added here -->
-                        </div>
-
-                        <div style="margin-top: 16px; display: flex; gap: 12px;">
-                            <button class="btn btn-outline" id="addBulkRowBtn">+ เพิ่มแถว</button>
-                            <button class="btn btn-success" id="startBulkImportBtn">📥 นำเข้าทั้งหมด</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Import Results -->
-                <div class="card" id="importResultsCard" style="display: none;">
-                    <div class="card-header">
-                        <h3>📊 ผลการนำเข้า</h3>
-                    </div>
-                    <div class="card-body">
-                        <div id="importResults"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Usage Instructions -->
-            <div class="card" style="margin-top: 20px;">
+        <!-- Upload Tab -->
+        <div class="tab-content" id="uploadTab">
+            <div class="card">
                 <div class="card-header">
-                    <h3>📖 วิธีใช้งาน</h3>
+                    <h3>📤 อัปโหลดรูปภาพ</h3>
                 </div>
                 <div class="card-body">
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
-                        <div>
-                            <h4 style="color: var(--primary-light); margin-bottom: 8px;">1. อัปโหลด/นำเข้ารูปภาพ</h4>
-                            <p style="color: var(--text-secondary); font-size: 13px;">
-                                อัปโหลดรูปภาพหรือนำเข้าจาก URL พร้อมกำหนด Key สำหรับอ้างอิง
-                            </p>
+                    <div class="upload-zone" id="uploadZone">
+                        <span class="upload-icon">📁</span>
+                        <p class="upload-text">
+                            <strong>คลิกเพื่อเลือกไฟล์</strong> หรือลากไฟล์มาวางที่นี่
+                        </p>
+                        <p class="upload-hint">
+                            รองรับ: JPG, PNG, GIF, WebP (สูงสุด 5MB)
+                        </p>
+                        <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                    </div>
+
+                    <div class="upload-preview" id="uploadPreview" style="display: none;">
+                        <div class="form-row" style="margin-bottom: 20px;">
+                            <div class="form-group">
+                                <label for="uploadKey">Key (สำหรับอ้างอิง)</label>
+                                <input type="text" id="uploadKey" class="form-input" placeholder="เช่น product_1">
+                            </div>
+                            <div class="form-group">
+                                <label for="uploadName">ชื่อรูปภาพ</label>
+                                <input type="text" id="uploadName" class="form-input" placeholder="เช่น รูปสินค้า 1">
+                            </div>
+                            <div class="form-group">
+                                <label for="uploadCategory">หมวดหมู่</label>
+                                <select id="uploadCategory" class="select-input">
+                                    <option value="product">สินค้า</option>
+                                    <option value="promotion">โปรโมชัน</option>
+                                    <option value="qrcode">QR Code</option>
+                                    <option value="review">รีวิว</option>
+                                    <option value="banner">Banner</option>
+                                    <option value="general">ทั่วไป</option>
+                                </select>
+                            </div>
                         </div>
-                        <div>
-                            <h4 style="color: var(--primary-light); margin-bottom: 8px;">2. ใช้ Key ใน Instructions</h4>
-                            <p style="color: var(--text-secondary); font-size: 13px;">
-                                URL เดิมยังใช้ได้: <code
-                                    style="background: var(--bg-dark); padding: 2px 6px; border-radius: 4px;">[SEND_IMAGE:https://...]</code>
-                                <br>หรือใช้ Key ใหม่: <code
-                                    style="background: var(--bg-dark); padding: 2px 6px; border-radius: 4px; color: #10b981;">[IMG:product_1]</code>
-                            </p>
-                        </div>
-                        <div>
-                            <h4 style="color: var(--primary-light); margin-bottom: 8px;">3. ระบบแปลงอัตโนมัติ</h4>
-                            <p style="color: var(--text-secondary); font-size: 13px;">
-                                เมื่อส่งข้อความ ระบบจะแปลง Key เป็นรูปภาพจาก Volume โดยอัตโนมัติ
-                            </p>
+                        <img id="previewImage" alt="Preview">
+                        <div style="margin-top: 20px; display: flex; gap: 12px;">
+                            <button class="btn btn-primary" id="confirmUploadBtn">
+                                <span>💾</span>
+                                <span>บันทึกรูปภาพ</span>
+                            </button>
+                            <button class="btn btn-outline" id="cancelUploadBtn">ยกเลิก</button>
                         </div>
                     </div>
                 </div>
             </div>
-        </main>
+        </div>
+
+        <!-- Import from URL Tab -->
+        <div class="tab-content" id="importTab">
+            <div class="card">
+                <div class="card-header">
+                    <h3>🔗 นำเข้าจาก URL</h3>
+                </div>
+                <div class="card-body">
+                    <div class="import-form">
+                        <div class="form-group">
+                            <label for="importUrl">URL ของรูปภาพ</label>
+                            <input type="text" id="importUrl" class="form-input"
+                                placeholder="https://example.com/image.jpg">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="importKey">Key</label>
+                                <input type="text" id="importKey" class="form-input" placeholder="product_1">
+                            </div>
+                            <div class="form-group">
+                                <label for="importName">ชื่อ</label>
+                                <input type="text" id="importName" class="form-input" placeholder="รูปสินค้า 1">
+                            </div>
+                            <div class="form-group">
+                                <label for="importCategory">หมวดหมู่</label>
+                                <select id="importCategory" class="select-input">
+                                    <option value="product">สินค้า</option>
+                                    <option value="promotion">โปรโมชัน</option>
+                                    <option value="qrcode">QR Code</option>
+                                    <option value="review">รีวิว</option>
+                                    <option value="banner">Banner</option>
+                                    <option value="imported">นำเข้า</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-primary" id="importUrlBtn">
+                                <span>📥</span>
+                                <span>นำเข้า</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bulk Import Tab -->
+        <div class="tab-content" id="bulkTab">
+            <div class="card">
+                <div class="card-header">
+                    <h3>📦 นำเข้าหลายรูปจาก URLs</h3>
+                    <button class="btn btn-outline" id="autoDetectBtn">
+                        <span>🔍</span>
+                        <span>ตรวจจับอัตโนมัติ</span>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <p style="color: var(--text-muted); margin-bottom: 20px;">
+                        เพิ่ม URL และ Key สำหรับแต่ละรูปภาพ หรือคลิก "ตรวจจับอัตโนมัติ" เพื่อดึง URLs จาก Instructions
+                    </p>
+
+                    <div class="bulk-import-list" id="bulkImportList">
+                        <!-- Items will be added here -->
+                    </div>
+
+                    <div style="margin-top: 20px; display: flex; gap: 16px;">
+                        <button class="btn btn-outline" id="addBulkRowBtn">
+                            <span>+</span>
+                            <span>เพิ่มแถว</span>
+                        </button>
+                        <button class="btn btn-success" id="startBulkImportBtn">
+                            <span>📥</span>
+                            <span>นำเข้าทั้งหมด</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Import Results -->
+            <div class="card" id="importResultsCard" style="display: none;">
+                <div class="card-header">
+                    <h3>📊 ผลการนำเข้า</h3>
+                </div>
+                <div class="card-body">
+                    <div id="importResults"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Usage Instructions -->
+        <div class="card" style="margin-top: 28px;">
+            <div class="card-header">
+                <h3>📖 วิธีใช้งาน</h3>
+            </div>
+            <div class="card-body">
+                <div class="usage-guide">
+                    <div class="guide-item">
+                        <h4>1. อัปโหลด/นำเข้ารูปภาพ</h4>
+                        <p>
+                            อัปโหลดรูปภาพหรือนำเข้าจาก URL พร้อมกำหนด Key สำหรับอ้างอิง
+                        </p>
+                    </div>
+                    <div class="guide-item">
+                        <h4>2. ใช้ Key ใน Instructions</h4>
+                        <p>
+                            URL เดิมยังใช้ได้: <code>[SEND_IMAGE:https://...]</code>
+                            <br>หรือใช้ Key ใหม่: <code class="highlight">[IMG:product_1]</code>
+                        </p>
+                    </div>
+                    <div class="guide-item">
+                        <h4>3. ระบบแปลงอัตโนมัติ</h4>
+                        <p>
+                            เมื่อส่งข้อความ ระบบจะแปลง Key เป็นรูปภาพจาก Volume โดยอัตโนมัติ
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Toast Container -->
@@ -478,11 +714,11 @@
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
             toast.innerHTML = `
-        <span>${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'}</span>
-        <span>${message}</span>
-      `;
+                <span>${type === 'success' ? '✅' : type === 'error' ? '❌' : type === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                <span>${message}</span>
+            `;
             container.appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
+            setTimeout(() => toast.remove(), 4000);
         }
 
         // Format file size
@@ -523,13 +759,15 @@
             const filter = document.getElementById('categoryFilter');
 
             filter.innerHTML = `
-        <button class="filter-btn ${currentCategory === 'all' ? 'active' : ''}" data-category="all">ทั้งหมด (${images.length})</button>
-        ${categories.map(cat => `
-          <button class="filter-btn ${currentCategory === cat ? 'active' : ''}" data-category="${cat}">
-            ${cat} (${images.filter(img => img.category === cat).length})
-          </button>
-        `).join('')}
-      `;
+                <button class="filter-btn ${currentCategory === 'all' ? 'active' : ''}" data-category="all">
+                    ทั้งหมด (${images.length})
+                </button>
+                ${categories.map(cat => `
+                    <button class="filter-btn ${currentCategory === cat ? 'active' : ''}" data-category="${cat}">
+                        ${cat} (${images.filter(img => img.category === cat).length})
+                    </button>
+                `).join('')}
+            `;
 
             // Add click handlers
             filter.querySelectorAll('.filter-btn').forEach(btn => {
@@ -550,37 +788,46 @@
 
             if (filtered.length === 0) {
                 grid.innerHTML = `
-          <div class="card" style="grid-column: 1 / -1; text-align: center; padding: 40px;">
-            <p style="color: var(--text-muted);">ยังไม่มีรูปภาพ</p>
-            <button class="btn btn-primary" style="margin-top: 12px;" onclick="switchTab('upload')">
-              📤 อัปโหลดรูปภาพ
-            </button>
-          </div>
-        `;
+                    <div class="empty-state" style="grid-column: 1 / -1;">
+                        <span class="empty-state-icon">🖼️</span>
+                        <p>ยังไม่มีรูปภาพ</p>
+                        <button class="btn btn-primary" onclick="switchTab('upload')">
+                            <span>📤</span>
+                            <span>อัปโหลดรูปภาพ</span>
+                        </button>
+                    </div>
+                `;
                 return;
             }
 
             grid.innerHTML = filtered.map(img => `
-        <div class="image-card" data-key="${img.key}">
-          <img class="image-preview" src="/api/images/${img.key}/file" alt="${img.name}" 
-               onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🖼️</text></svg>'">
-          <div class="image-card-body">
-            <div class="image-key">
-              <code>[IMG:${img.key}]</code>
-              <button onclick="copyKey('${img.key}')" title="คัดลอก">📋</button>
-            </div>
-            <div class="image-name">${img.name}</div>
-            <div class="image-meta">
-              ${img.category} • ${formatSize(img.size || 0)}
-            </div>
-            <div class="image-actions">
-              <button class="btn btn-sm btn-outline" onclick="viewImage('${img.key}')">👁️</button>
-              <button class="btn btn-sm btn-outline" onclick="downloadImage('${img.key}')">💾</button>
-              <button class="btn btn-sm btn-danger" onclick="deleteImage('${img.key}')">🗑️</button>
-            </div>
-          </div>
-        </div>
-      `).join('');
+                <div class="image-card" data-key="${img.key}">
+                    <img class="image-preview" src="/api/images/${img.key}/file" alt="${img.name}" 
+                         loading="lazy"
+                         onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23f1f5f9%22 width=%22100%22 height=%22100%22/><text y=%22.65em%22 x=%2250%22 text-anchor=%22middle%22 font-size=%2250%22>🖼️</text></svg>'">
+                    <div class="image-card-body">
+                        <div class="image-key">
+                            <code>[IMG:${img.key}]</code>
+                            <button onclick="copyKey('${img.key}')" title="คัดลอก">📋</button>
+                        </div>
+                        <div class="image-name">${img.name}</div>
+                        <div class="image-meta">
+                            ${img.category} • ${formatSize(img.size || 0)}
+                        </div>
+                        <div class="image-actions">
+                            <button class="btn btn-sm btn-outline" onclick="viewImage('${img.key}')">
+                                <span>👁️</span>
+                            </button>
+                            <button class="btn btn-sm btn-outline" onclick="downloadImage('${img.key}')">
+                                <span>💾</span>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteImage('${img.key}')">
+                                <span>🗑️</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
         }
 
         // Copy key
@@ -744,20 +991,29 @@
 
         function renderBulkList() {
             const list = document.getElementById('bulkImportList');
+            if (bulkItems.length === 0) {
+                list.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                        คลิก "เพิ่มแถว" หรือ "ตรวจจับอัตโนมัติ" เพื่อเริ่มต้น
+                    </div>
+                `;
+                return;
+            }
+
             list.innerHTML = bulkItems.map(item => `
-        <div class="bulk-import-item">
-          <input type="text" placeholder="URL" value="${item.url}" 
-                 onchange="updateBulkItem(${item.id}, 'url', this.value)">
-          <input type="text" placeholder="Key" value="${item.key}"
-                 onchange="updateBulkItem(${item.id}, 'key', this.value)">
-          <select onchange="updateBulkItem(${item.id}, 'category', this.value)">
-            <option value="product">สินค้า</option>
-            <option value="promotion">โปรโมชัน</option>
-            <option value="imported" selected>นำเข้า</option>
-          </select>
-          <button class="btn btn-sm btn-danger" onclick="removeBulkRow(${item.id})">×</button>
-        </div>
-      `).join('');
+                <div class="bulk-import-item">
+                    <input type="text" placeholder="URL" value="${item.url}" 
+                           onchange="updateBulkItem(${item.id}, 'url', this.value)">
+                    <input type="text" placeholder="Key" value="${item.key}"
+                           onchange="updateBulkItem(${item.id}, 'key', this.value)">
+                    <select onchange="updateBulkItem(${item.id}, 'category', this.value)">
+                        <option value="product">สินค้า</option>
+                        <option value="promotion">โปรโมชัน</option>
+                        <option value="imported" selected>นำเข้า</option>
+                    </select>
+                    <button class="btn btn-sm btn-danger" onclick="removeBulkRow(${item.id})">×</button>
+                </div>
+            `).join('');
         }
 
         function updateBulkItem(id, field, value) {
@@ -797,16 +1053,16 @@
 
                 document.getElementById('importResultsCard').style.display = 'block';
                 document.getElementById('importResults').innerHTML = `
-          <div style="display: flex; gap: 20px; margin-bottom: 16px;">
-            <div style="color: var(--success);">✅ สำเร็จ: ${success}</div>
-            <div style="color: var(--danger);">❌ ไม่สำเร็จ: ${failed}</div>
-          </div>
-          ${results.map(r => `
-            <div style="padding: 8px; background: var(--bg-dark); border-radius: 4px; margin-bottom: 4px;">
-              ${r.success ? '✅' : '❌'} ${r.key} ${r.error ? `- ${r.error}` : ''}
-            </div>
-          `).join('')}
-        `;
+                    <div style="display: flex; gap: 24px; margin-bottom: 20px;">
+                        <div style="color: var(--success); font-weight: 600;">✅ สำเร็จ: ${success}</div>
+                        <div style="color: var(--danger); font-weight: 600;">❌ ไม่สำเร็จ: ${failed}</div>
+                    </div>
+                    ${results.map(r => `
+                        <div style="padding: 12px 16px; background: var(--bg-input); border-radius: var(--radius-sm); margin-bottom: 8px; border-left: 4px solid ${r.success ? 'var(--success)' : 'var(--danger)'};">
+                            ${r.success ? '✅' : '❌'} <strong>${r.key}</strong> ${r.error ? `- ${r.error}` : ''}
+                        </div>
+                    `).join('')}
+                `;
 
                 bulkItems = [];
                 renderBulkList();
@@ -858,6 +1114,7 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             loadImages();
+            renderBulkList();
 
             // Tab buttons
             document.querySelectorAll('.tab-btn').forEach(btn => {

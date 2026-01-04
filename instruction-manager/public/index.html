@@ -4,17 +4,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="THAYA Instruction Manager - จัดการคำสั่งและ Instructions สำหรับ AI Chatbot อย่างมืออาชีพ">
     <title>THAYA Instruction Manager</title>
+
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+
+    <!-- Styles -->
     <link rel="stylesheet" href="styles.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
 </head>
 
 <body>
     <div class="app-container">
         <!-- Sidebar -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
                     <span class="logo-icon">📋</span>
@@ -24,23 +35,23 @@
             </div>
 
             <nav class="sidebar-nav">
-                <button class="nav-item active" data-view="dashboard">
+                <button class="nav-item active" data-view="dashboard" id="nav-dashboard">
                     <span class="nav-icon">🏠</span>
                     <span>แดชบอร์ด</span>
                 </button>
-                <button class="nav-item" data-view="versions">
+                <button class="nav-item" data-view="versions" id="nav-versions">
                     <span class="nav-icon">📁</span>
                     <span>เวอร์ชันทั้งหมด</span>
                 </button>
-                <button class="nav-item" data-view="editor">
+                <button class="nav-item" data-view="editor" id="nav-editor">
                     <span class="nav-icon">✏️</span>
                     <span>แก้ไข</span>
                 </button>
-                <button class="nav-item" data-view="preview">
+                <button class="nav-item" data-view="preview" id="nav-preview">
                     <span class="nav-icon">👁️</span>
                     <span>ดูตัวอย่าง</span>
                 </button>
-                <a href="images.html" class="nav-item" style="text-decoration: none;">
+                <a href="images.html" class="nav-item" id="nav-images" style="text-decoration: none;">
                     <span class="nav-icon">🖼️</span>
                     <span>จัดการรูปภาพ</span>
                 </a>
@@ -58,8 +69,16 @@
             <!-- Dashboard View -->
             <section class="view active" id="dashboardView">
                 <header class="view-header">
-                    <h2>แดชบอร์ด</h2>
-                    <p>ภาพรวมของ Instructions ทั้งหมด</p>
+                    <div>
+                        <h2>แดชบอร์ด</h2>
+                        <p>ภาพรวมของ Instructions ทั้งหมด</p>
+                    </div>
+                    <div class="header-actions">
+                        <button class="btn btn-outline" id="refreshAllBtn">
+                            <span>🔄</span>
+                            <span>รีเฟรช</span>
+                        </button>
+                    </div>
                 </header>
 
                 <div class="dashboard-grid">
@@ -77,12 +96,18 @@
                                 </div>
                                 <div class="stat-item">
                                     <span class="stat-value" id="defaultCost">-</span>
-                                    <span class="stat-label">$/Request</span>
+                                    <span class="stat-label">$ / Request</span>
                                 </div>
                             </div>
                             <div class="card-actions">
-                                <button class="btn btn-outline" id="viewDefaultBtn">ดูรายละเอียด</button>
-                                <button class="btn btn-primary" id="duplicateDefaultBtn">📋 ทำสำเนา</button>
+                                <button class="btn btn-outline" id="viewDefaultBtn">
+                                    <span>👁️</span>
+                                    <span>ดูรายละเอียด</span>
+                                </button>
+                                <button class="btn btn-primary" id="duplicateDefaultBtn">
+                                    <span>📋</span>
+                                    <span>ทำสำเนา</span>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -146,6 +171,10 @@
                                 <span class="quick-icon">🔍</span>
                                 <span>เปรียบเทียบเวอร์ชัน</span>
                             </button>
+                            <button class="quick-action" id="goToImagesBtn">
+                                <span class="quick-icon">🖼️</span>
+                                <span>จัดการรูปภาพ</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -154,26 +183,42 @@
             <!-- Versions List View -->
             <section class="view" id="versionsView">
                 <header class="view-header">
-                    <h2>เวอร์ชันทั้งหมด</h2>
+                    <div>
+                        <h2>เวอร์ชันทั้งหมด</h2>
+                        <p>จัดการและเลือกเวอร์ชันที่ต้องการใช้งาน</p>
+                    </div>
                     <div class="header-actions">
                         <input type="text" class="search-input" placeholder="🔍 ค้นหาเวอร์ชัน..." id="searchVersions">
+                        <button class="btn btn-primary" id="newVersionBtn2">
+                            <span>+</span>
+                            <span>สร้างใหม่</span>
+                        </button>
                     </div>
                 </header>
 
                 <div class="versions-list" id="versionsList">
                     <!-- Versions will be loaded here -->
+                    <div class="card" style="text-align: center; padding: 60px 40px;">
+                        <p style="color: var(--text-muted); font-size: 16px;">กำลังโหลดเวอร์ชัน...</p>
+                    </div>
                 </div>
             </section>
 
             <!-- Editor View -->
             <section class="view" id="editorView">
                 <header class="view-header">
-                    <h2>แก้ไข Instructions</h2>
+                    <div>
+                        <h2>แก้ไข Instructions</h2>
+                        <p>ปรับแต่งเนื้อหาและคำสั่งสำหรับ AI</p>
+                    </div>
                     <div class="header-actions">
                         <select id="versionSelect" class="select-input">
                             <option value="">-- เลือกเวอร์ชัน --</option>
                         </select>
-                        <button class="btn btn-success" id="saveVersionBtn">💾 บันทึก</button>
+                        <button class="btn btn-success" id="saveVersionBtn">
+                            <span>💾</span>
+                            <span>บันทึก</span>
+                        </button>
                     </div>
                 </header>
 
@@ -186,12 +231,12 @@
                         <div class="card-body">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label>ชื่อเวอร์ชัน</label>
+                                    <label for="versionName">ชื่อเวอร์ชัน</label>
                                     <input type="text" id="versionName" class="form-input"
                                         placeholder="เช่น Version 2 - Optimized">
                                 </div>
                                 <div class="form-group">
-                                    <label>คำอธิบาย</label>
+                                    <label for="versionDesc">คำอธิบาย</label>
                                     <input type="text" id="versionDesc" class="form-input" placeholder="คำอธิบายสั้นๆ">
                                 </div>
                             </div>
@@ -202,10 +247,12 @@
                     <div class="card">
                         <div class="card-header collapsible" data-target="googleDocEditor">
                             <h3>📄 Google Doc Instructions</h3>
-                            <span class="token-count" id="googleDocTokens">0 tokens</span>
+                            <div class="header-tools">
+                                <span class="token-count" id="googleDocTokens">0 tokens</span>
+                            </div>
                         </div>
                         <div class="card-body" id="googleDocEditor">
-                            <textarea id="googleDocContent" class="code-editor" rows="10"
+                            <textarea id="googleDocContent" class="code-editor" rows="12"
                                 placeholder="เนื้อหาจาก Google Doc..."></textarea>
                         </div>
                     </div>
@@ -248,10 +295,12 @@
                     <div class="card">
                         <div class="card-header collapsible" data-target="staticEditor">
                             <h3>📌 Static Instructions</h3>
-                            <span class="token-count" id="staticTokens">0 tokens</span>
+                            <div class="header-tools">
+                                <span class="token-count" id="staticTokens">0 tokens</span>
+                            </div>
                         </div>
                         <div class="card-body" id="staticEditor">
-                            <textarea id="staticContent" class="code-editor" rows="6"
+                            <textarea id="staticContent" class="code-editor" rows="8"
                                 placeholder="คำสั่งเพิ่มเติมที่ต้องการใส่ท้าย..."></textarea>
                         </div>
                     </div>
@@ -261,7 +310,10 @@
             <!-- Preview View -->
             <section class="view" id="previewView">
                 <header class="view-header">
-                    <h2>ดูตัวอย่าง & Export</h2>
+                    <div>
+                        <h2>ดูตัวอย่าง & Export</h2>
+                        <p>ดูผลลัพธ์สุดท้ายและส่งออกข้อมูล</p>
+                    </div>
                     <div class="header-actions">
                         <select id="previewVersionSelect" class="select-input">
                             <option value="default">📌 ค่าเริ่มต้น (Google)</option>
@@ -270,7 +322,10 @@
                             <option value="pretty">Pretty JSON</option>
                             <option value="compact">Compact JSON</option>
                         </select>
-                        <button class="btn btn-primary" id="buildBtn">🔧 Build</button>
+                        <button class="btn btn-primary" id="buildBtn">
+                            <span>🔧</span>
+                            <span>Build</span>
+                        </button>
                     </div>
                 </header>
 
@@ -296,7 +351,7 @@
                                 </div>
                                 <div class="stat-item">
                                     <span class="stat-value" id="previewCost">-</span>
-                                    <span class="stat-label">$/Request</span>
+                                    <span class="stat-label">$ / Request</span>
                                 </div>
                             </div>
                         </div>
@@ -307,8 +362,14 @@
                         <div class="card-header">
                             <h3>📤 Output</h3>
                             <div class="header-tools">
-                                <button class="btn btn-sm btn-outline" id="copyOutputBtn">📋 Copy</button>
-                                <button class="btn btn-sm btn-outline" id="downloadOutputBtn">💾 Download</button>
+                                <button class="btn btn-sm btn-outline" id="copyOutputBtn">
+                                    <span>📋</span>
+                                    <span>Copy</span>
+                                </button>
+                                <button class="btn btn-sm btn-outline" id="downloadOutputBtn">
+                                    <span>💾</span>
+                                    <span>Download</span>
+                                </button>
                             </div>
                         </div>
                         <div class="card-body">
@@ -325,7 +386,7 @@
         <div class="modal" id="modal">
             <div class="modal-header">
                 <h3 id="modalTitle">Modal Title</h3>
-                <button class="modal-close" id="modalClose">&times;</button>
+                <button class="modal-close" id="modalClose" aria-label="Close modal">&times;</button>
             </div>
             <div class="modal-body" id="modalBody">
                 <!-- Modal content here -->
