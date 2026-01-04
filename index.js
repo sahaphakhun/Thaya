@@ -11,6 +11,7 @@ const bodyParser = require('body-parser');
 const request = require('request');
 const axios = require('axios');
 const util = require('util');
+const path = require('path');
 const requestPost = util.promisify(request.post);
 const requestGet = util.promisify(request.get);
 const { google } = require('googleapis');
@@ -18,7 +19,10 @@ const { MongoClient } = require('mongodb');
 const { OpenAI } = require('openai');
 
 const app = express();
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '10mb' }));
+
+// ====================== Serve Static Files for Instruction Manager ======================
+app.use('/manager', express.static(path.join(__dirname, 'instruction-manager', 'public')));
 
 // ====================== 1) ENV Config ======================
 const PORT = process.env.PORT || 3000;
@@ -1771,6 +1775,11 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// ====================== Instruction Manager Routes ======================
+const instructionRoutes = require('./instructionRoutes');
+instructionRoutes.setDBConnection(connectDB);
+app.use('/api', instructionRoutes.router);
+
 // ====================== Start Server ======================
 app.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT}`);
@@ -1787,6 +1796,7 @@ app.listen(PORT, async () => {
     startFollowupScheduler();
 
     console.log("[DEBUG] Startup completed. Ready to receive webhooks.");
+    console.log(`[INFO] Instruction Manager available at: http://localhost:${PORT}/manager`);
   } catch (err) {
     console.error("Startup error:", err);
   }
