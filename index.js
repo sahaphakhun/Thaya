@@ -75,9 +75,16 @@ let mongoClient = null;
 
 async function connectDB() {
   if (!mongoClient) {
-    mongoClient = new MongoClient(MONGO_URI);
+    // ข้อ 5: เพิ่ม connection pooling options เพื่อลด memory usage
+    mongoClient = new MongoClient(MONGO_URI, {
+      maxPoolSize: 10,           // จำกัด connections สูงสุด
+      minPoolSize: 2,            // รักษา connections ขั้นต่ำ
+      maxIdleTimeMS: 30000,      // ปิด idle connections หลัง 30 วินาที
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
     await mongoClient.connect();
-    console.log("MongoDB connected (global).");
+    console.log("MongoDB connected (global) with pooling.");
   }
   return mongoClient;
 }
@@ -245,11 +252,32 @@ function normalizeRoleContent(role, content) {
   return { role, content: JSON.stringify(content) };
 }
 
+// ข้อ 3: ปรับ Image Processing - เพิ่ม size limit และ timeout
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB limit
+const IMAGE_DOWNLOAD_TIMEOUT = 10000; // 10 seconds timeout
+
 async function downloadImageAsBase64(url) {
   try {
-    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    const response = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: IMAGE_DOWNLOAD_TIMEOUT,
+      maxContentLength: MAX_IMAGE_SIZE,
+      maxBodyLength: MAX_IMAGE_SIZE
+    });
+
+    // ตรวจสอบขนาดไฟล์
+    const fileSize = response.data.length;
+    if (fileSize > MAX_IMAGE_SIZE) {
+      console.warn(`[WARN] Image too large (${(fileSize / 1024 / 1024).toFixed(2)}MB), skipping base64 conversion`);
+      throw new Error('Image too large');
+    }
+
     const contentType = response.headers['content-type'] || 'image/jpeg';
     const base64 = Buffer.from(response.data).toString('base64');
+
+    // Clear buffer reference เพื่อให้ GC ทำงานได้
+    response.data = null;
+
     return `data:${contentType};base64,${base64}`;
   } catch (err) {
     console.error(`[ERROR] downloadImageAsBase64 failed: ${err.message}`);
@@ -1327,19 +1355,12 @@ function startFollowupScheduler() {
           // อัปเดต followupIndex ก่อนส่งข้อความ เพื่อป้องกันการส่งซ้ำ
           await updateFollowupData(userId, idx + 1, new Date());
 
-          // หา pageKey ที่เหมาะสมสำหรับผู้ใช้นี้
-          // ตรวจสอบจากประวัติการสนทนาล่าสุด
-          const history = await getChatHistory(userId);
+          // ข้อ 4: ปรับ Scheduler - ลบการดึง chat history ที่ไม่จำเป็น
+          // หา pageKey โดยตรงจาก user_page_mapping แทนการดึง chat history ทั้งหมด
           let pageKey = 'default';
-
-          // ถ้ามีประวัติการสนทนา ให้ดูว่าล่าสุดคุยกับเพจไหน
-          if (history.length > 0) {
-            // ตรวจสอบว่าผู้ใช้นี้เคยคุยกับเพจไหนล่าสุด
-            // โดยดูจากข้อมูลใน MongoDB หรือใช้ค่า default
-            const userPageData = await db.collection("user_page_mapping").findOne({ userId });
-            if (userPageData && userPageData.pageKey) {
-              pageKey = userPageData.pageKey;
-            }
+          const userPageData = await db.collection("user_page_mapping").findOne({ userId });
+          if (userPageData && userPageData.pageKey) {
+            pageKey = userPageData.pageKey;
           }
 
           await sendTextMessage(userId, msg, pageKey);
@@ -1351,11 +1372,32 @@ function startFollowupScheduler() {
     } finally {
       isRunning = false;
     }
-  }, 60000); // 1 นาที
+  }, 180000); // ข้อ 4: เปลี่ยนจาก 1 นาที เป็น 3 นาที เพื่อลด memory spike
 }
 
 // ====================== 11) Webhook Routes & Startup ======================
-const processedMessageIds = new Set();
+// ข้อ 1: แก้ Memory Leak - เปลี่ยนจาก Set เป็น Map พร้อม auto-cleanup
+const processedMessageIds = new Map(); // เก็บ { mid: timestamp }
+const MESSAGE_EXPIRE_MS = 60 * 60 * 1000; // 1 ชั่วโมง
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // ทำ cleanup ทุก 5 นาที
+
+// ฟังก์ชันลบ message IDs เก่า
+function cleanupOldMessageIds() {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [mid, timestamp] of processedMessageIds) {
+    if (now - timestamp > MESSAGE_EXPIRE_MS) {
+      processedMessageIds.delete(mid);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`[Memory Cleanup] Removed ${cleaned} old message IDs. Current size: ${processedMessageIds.size}`);
+  }
+}
+
+// เริ่ม cleanup interval
+setInterval(cleanupOldMessageIds, CLEANUP_INTERVAL_MS);
 
 // Health check endpoint สำหรับ Railway
 app.get('/', (req, res) => {
@@ -1446,7 +1488,8 @@ app.post('/webhook', async (req, res) => {
             console.log("Skipping repeated mid:", mid);
             continue;
           } else {
-            processedMessageIds.add(mid);
+            // ใช้ Map.set() แทน Set.add() และเก็บ timestamp ไว้สำหรับ cleanup
+            processedMessageIds.set(mid, Date.now());
           }
         }
 
