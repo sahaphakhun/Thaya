@@ -20,6 +20,14 @@ PAGE_ACCESS_TOKEN_3=your_page3_token
 OPENAI_API_KEY=your_openai_api_key
 VERIFY_TOKEN=AiDee_a4wfaw4
 MONGO_URI=your_mongodb_connection_string
+
+# Optional (แผนลดพื้นที่ MongoDB แบบ aggressive)
+CHAT_HISTORY_MAX_MESSAGES=50
+CHAT_HISTORY_SUMMARY_MIN_BATCH=10
+CHAT_HISTORY_SUMMARY_SOURCE_MAX_CHARS=6000
+CHAT_HISTORY_SUMMARY_MAX_CHARS=1200
+ENABLE_CHAT_SUMMARY=true
+ENABLE_ORDER_CHAT_HISTORY=false
 ```
 
 ### 3. ตั้งค่า Webhook URL

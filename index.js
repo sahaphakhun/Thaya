@@ -49,6 +49,18 @@ const MONGO_URI = process.env.MONGO_URI;
 
 const IMAGE_DOWNLOAD_FAIL_PLACEHOLDER = "[ข้อความจากระบบ: ผู้ใช้ส่งรูปภาพมา แต่ไม่สามารถดาวน์โหลดได้ โปรดแจ้งลูกค้าว่ารอแอดมินยืนยันหากเป็นรูปภาพการชำระเงิน หรือแจ้งให้รบกวนพิมพ์ที่อยู่มาหากเป็นรูปภาพที่อยู่ของการจัดส่ง (ถามผู้ใช้หรือวิเคราะห์จากบริบท)]";
 
+function getIntEnv(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const CHAT_HISTORY_MAX_MESSAGES = getIntEnv(process.env.CHAT_HISTORY_MAX_MESSAGES, 50);
+const CHAT_HISTORY_SUMMARY_MIN_BATCH = getIntEnv(process.env.CHAT_HISTORY_SUMMARY_MIN_BATCH, 10);
+const CHAT_HISTORY_SUMMARY_SOURCE_MAX_CHARS = getIntEnv(process.env.CHAT_HISTORY_SUMMARY_SOURCE_MAX_CHARS, 6000);
+const CHAT_HISTORY_SUMMARY_MAX_CHARS = getIntEnv(process.env.CHAT_HISTORY_SUMMARY_MAX_CHARS, 1200);
+const ENABLE_CHAT_SUMMARY = process.env.ENABLE_CHAT_SUMMARY !== "false";
+const ENABLE_ORDER_CHAT_HISTORY = process.env.ENABLE_ORDER_CHAT_HISTORY === "true";
+
 // เพิ่มการเก็บข้อมูลเพจ (pageId -> pageName)
 const PAGE_MAPPING = {
   // ตัวอย่าง: 'page_id_1': 'default', 'page_id_2': 'page2', ...
@@ -93,17 +105,79 @@ async function connectDB() {
   return mongoClient;
 }
 
+function stripRichContentForStorage(content) {
+  if (!Array.isArray(content)) return content;
+
+  const sanitized = [];
+  for (const item of content) {
+    if (item && item.type === "text" && typeof item.text === "string") {
+      sanitized.push({ type: "text", text: item.text });
+      continue;
+    }
+    if (item && item.type === "image_url") {
+      sanitized.push({ type: "text", text: "[ผู้ใช้ส่งรูปภาพ]" });
+      continue;
+    }
+    if (item && item.type === "video_url") {
+      sanitized.push({ type: "text", text: "[ผู้ใช้ส่งวิดีโอ]" });
+      continue;
+    }
+    sanitized.push({ type: "text", text: "[มีไฟล์แนบ]" });
+  }
+  return sanitized;
+}
+
+function sanitizeContentForStorage(content) {
+  if (Array.isArray(content)) {
+    return stripRichContentForStorage(content);
+  }
+  if (typeof content === "string" && content.startsWith("data:image/")) {
+    return "[ผู้ใช้ส่งรูปภาพ]";
+  }
+  return content;
+}
+
+function parseStoredContent(rawContent) {
+  if (typeof rawContent !== "string") return rawContent;
+  try {
+    return JSON.parse(rawContent);
+  } catch (err) {
+    return rawContent;
+  }
+}
+
+function extractPlainTextFromContent(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map(item => {
+        if (item && typeof item.text === "string") return item.text;
+        return "[มีไฟล์แนบ]";
+      })
+      .join(" ");
+  }
+  return JSON.stringify(content);
+}
+
+function truncateText(text, maxChars) {
+  if (typeof text !== "string") return text;
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}...[ตัดข้อความยาว]`;
+}
+
 // เพิ่มฟังก์ชันสำหรับบันทึกประวัติการสนทนาสำหรับโมเดลบันทึกออเดอร์
 async function saveOrderChatHistory(userId, messageContent, role = "user") {
+  if (!ENABLE_ORDER_CHAT_HISTORY) return;
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("order_chat_history");
 
+  const sanitized = sanitizeContentForStorage(messageContent);
   let msgToSave;
-  if (typeof messageContent === "string") {
-    msgToSave = messageContent;
+  if (typeof sanitized === "string") {
+    msgToSave = sanitized;
   } else {
-    msgToSave = JSON.stringify(messageContent);
+    msgToSave = JSON.stringify(sanitized);
   }
 
   console.log(`[DEBUG] Saving order chat history => role=${role}`);
@@ -118,23 +192,21 @@ async function saveOrderChatHistory(userId, messageContent, role = "user") {
 
 // เพิ่มฟังก์ชันสำหรับดึงประวัติการสนทนาสำหรับโมเดลบันทึกออเดอร์
 async function getOrderChatHistory(userId) {
+  if (!ENABLE_ORDER_CHAT_HISTORY) return [];
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("order_chat_history");
   const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
 
   return chats.map(ch => {
-    try {
-      const parsed = JSON.parse(ch.content);
-      return normalizeRoleContent(ch.role, parsed);
-    } catch (err) {
-      return normalizeRoleContent(ch.role, ch.content);
-    }
+    const parsed = parseStoredContent(ch.content);
+    return normalizeRoleContent(ch.role, parsed);
   });
 }
 
 // เพิ่มฟังก์ชันสำหรับลบประวัติการสนทนาสำหรับโมเดลบันทึกออเดอร์
 async function clearOrderChatHistory(userId) {
+  if (!ENABLE_ORDER_CHAT_HISTORY) return;
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("order_chat_history");
@@ -337,19 +409,117 @@ function formatTimestampThai(dateObj) {
   return `${day}/${month}/${year} ${hour}:${min}`;
 }
 
+async function generateChatSummary(previousSummary, messages) {
+  if (!ENABLE_CHAT_SUMMARY || !OPENAI_API_KEY) return null;
+
+  const sourceLines = messages.map(msg => {
+    const parsed = parseStoredContent(msg.content);
+    const text = extractPlainTextFromContent(parsed);
+    return `${msg.role}: ${text}`;
+  });
+
+  const sourceText = truncateText(sourceLines.join("\n"), CHAT_HISTORY_SUMMARY_SOURCE_MAX_CHARS);
+  const summarySeed = previousSummary ? `สรุปเดิม:\n${previousSummary}\n\n` : "";
+
+  try {
+    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content: "สรุปบทสนทนาให้สั้น กระชับ เน้นเจตนา/ความต้องการ/สถานะออเดอร์ หลีกเลี่ยงข้อมูลส่วนตัวเช่นเบอร์โทรหรือที่อยู่ ถ้าจำเป็นให้เขียนแบบปิดบัง"
+        },
+        {
+          role: "user",
+          content: `${summarySeed}บทสนทนาใหม่:\n${sourceText}`
+        }
+      ]
+    });
+
+    let summary = response.choices?.[0]?.message?.content || "";
+    summary = summary.replace(/\s+/g, " ").trim();
+    return truncateText(summary, CHAT_HISTORY_SUMMARY_MAX_CHARS);
+  } catch (err) {
+    console.error("generateChatSummary error:", err);
+    return null;
+  }
+}
+
+async function upsertChatSummary(userId, messages) {
+  if (!ENABLE_CHAT_SUMMARY || !OPENAI_API_KEY) return;
+  if (!messages || messages.length === 0) return;
+
+  const client = await connectDB();
+  const db = client.db("chatbot");
+  const summaries = db.collection("chat_history_summaries");
+  const existing = await summaries.findOne({ senderId: userId });
+
+  const summary = await generateChatSummary(existing?.summary || "", messages);
+  if (!summary) return;
+
+  const first = messages[0];
+  const last = messages[messages.length - 1];
+  await summaries.updateOne(
+    { senderId: userId },
+    {
+      $set: {
+        summary,
+        updatedAt: new Date(),
+        fromTimestamp: first.timestamp,
+        toTimestamp: last.timestamp,
+        messageCount: messages.length
+      }
+    },
+    { upsert: true }
+  );
+}
+
+async function pruneChatHistory(userId) {
+  if (CHAT_HISTORY_MAX_MESSAGES <= 0) return;
+
+  const client = await connectDB();
+  const db = client.db("chatbot");
+  const coll = db.collection("chat_history");
+
+  const total = await coll.countDocuments({ senderId: userId });
+  const overflow = total - CHAT_HISTORY_MAX_MESSAGES;
+  if (overflow <= 0) return;
+
+  const canSummarize = ENABLE_CHAT_SUMMARY && OPENAI_API_KEY;
+  const batchSize = Math.max(CHAT_HISTORY_SUMMARY_MIN_BATCH, 1);
+  let pruneCount = overflow;
+  if (canSummarize && batchSize > 1) {
+    if (total <= CHAT_HISTORY_MAX_MESSAGES + batchSize - 1) return;
+    pruneCount = batchSize;
+  }
+
+  const messagesToPrune = await coll.find({ senderId: userId })
+    .sort({ timestamp: 1 })
+    .limit(pruneCount)
+    .toArray();
+
+  if (messagesToPrune.length === 0) return;
+
+  if (canSummarize) {
+    await upsertChatSummary(userId, messagesToPrune);
+  }
+
+  await coll.deleteMany({ _id: { $in: messagesToPrune.map(msg => msg._id) } });
+}
+
 async function getChatHistory(userId) {
   const client = await connectDB();
   const db = client.db("chatbot");
   const coll = db.collection("chat_history");
   const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
 
-  return chats.map(ch => {
-    let content;
-    try {
-      content = JSON.parse(ch.content);
-    } catch (err) {
-      content = ch.content;
-    }
+  const summaries = db.collection("chat_history_summaries");
+  const summaryDoc = await summaries.findOne({ senderId: userId });
+
+  const history = chats.map(ch => {
+    let content = parseStoredContent(ch.content);
 
     // เพิ่ม timestamp เฉพาะข้อความฝั่งลูกค้า (role === "user")
     if (ch.role === "user") {
@@ -366,6 +536,11 @@ async function getChatHistory(userId) {
 
     return { role: ch.role, content };
   });
+
+  if (summaryDoc && summaryDoc.summary) {
+    history.unshift({ role: "system", content: `สรุปการสนทนาก่อนหน้า: ${summaryDoc.summary}` });
+  }
+  return history;
 }
 
 async function saveChatHistory(userId, messageContent, role = "user") {
@@ -373,11 +548,12 @@ async function saveChatHistory(userId, messageContent, role = "user") {
   const db = client.db("chatbot");
   const coll = db.collection("chat_history");
 
+  const sanitized = sanitizeContentForStorage(messageContent);
   let msgToSave;
-  if (typeof messageContent === "string") {
-    msgToSave = messageContent;
+  if (typeof sanitized === "string") {
+    msgToSave = sanitized;
   } else {
-    msgToSave = JSON.stringify(messageContent);
+    msgToSave = JSON.stringify(sanitized);
   }
 
   console.log(`[DEBUG] Saving chat history => role=${role}`);
@@ -388,6 +564,9 @@ async function saveChatHistory(userId, messageContent, role = "user") {
     timestamp: new Date(),
   });
   console.log(`[DEBUG] Saved message. userId=${userId}, role=${role}`);
+  pruneChatHistory(userId).catch(err => {
+    console.error("pruneChatHistory error:", err);
+  });
 }
 
 async function getUserStatus(userId) {
