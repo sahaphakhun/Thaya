@@ -54,12 +54,53 @@ function getIntEnv(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function normalizeCommandText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasAnyKeyword(normalizedText, keywords) {
+  return keywords.some(keyword => normalizedText.includes(keyword));
+}
+
+const ADMIN_DISABLE_AI_KEYWORDS = [
+  "แอดมิน thaya รอให้คำปรึกษาค่ะ",
+  "#ปิดระบบ",
+  "ปิดระบบ",
+  "#ปิดบอท",
+  "ปิดระบบ ai",
+  "ปิด ai",
+  "หยุด ai",
+  "หยุดตอบอัตโนมัติ",
+  "ให้แอดมินตอบ",
+  "รอให้แอดมินตอบ",
+  "handover"
+].map(normalizeCommandText);
+
+const ADMIN_ENABLE_AI_KEYWORDS = [
+  "แอดมิน thaya ยินดีดูแลลูกค้าค่ะ",
+  "#เปิดระบบ",
+  "เปิดระบบ",
+  "#เปิดบอท",
+  "เปิดระบบ ai",
+  "เปิด ai",
+  "ให้ ai ตอบ",
+  "ให้บอทตอบ",
+  "กลับมาให้ ai ตอบ",
+  "resume ai"
+].map(normalizeCommandText);
+
 const CHAT_HISTORY_MAX_MESSAGES = getIntEnv(process.env.CHAT_HISTORY_MAX_MESSAGES, 50);
 const CHAT_HISTORY_SUMMARY_MIN_BATCH = getIntEnv(process.env.CHAT_HISTORY_SUMMARY_MIN_BATCH, 10);
 const CHAT_HISTORY_SUMMARY_SOURCE_MAX_CHARS = getIntEnv(process.env.CHAT_HISTORY_SUMMARY_SOURCE_MAX_CHARS, 6000);
 const CHAT_HISTORY_SUMMARY_MAX_CHARS = getIntEnv(process.env.CHAT_HISTORY_SUMMARY_MAX_CHARS, 1200);
 const ENABLE_CHAT_SUMMARY = process.env.ENABLE_CHAT_SUMMARY !== "false";
 const ENABLE_ORDER_CHAT_HISTORY = process.env.ENABLE_ORDER_CHAT_HISTORY === "true";
+const MONGO_CONNECT_RETRY_COUNT = Math.max(getIntEnv(process.env.MONGO_CONNECT_RETRY_COUNT, 2), 0);
+const MONGO_OPERATION_RETRY_COUNT = Math.max(getIntEnv(process.env.MONGO_OPERATION_RETRY_COUNT, 1), 0);
+const MONGO_RETRY_DELAY_MS = Math.max(getIntEnv(process.env.MONGO_RETRY_DELAY_MS, 500), 100);
 
 // เพิ่มการเก็บข้อมูลเพจ (pageId -> pageName)
 const PAGE_MAPPING = {
@@ -88,21 +129,164 @@ const FOLLOWUP_SHEET_RANGE = "ติดตามลูกค้า!A2:B";
 
 // ====================== 2) MongoDB ======================
 let mongoClient = null;
+let mongoConnectPromise = null;
+let mongoIndexesEnsured = false;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isRetryableMongoError(err) {
+  if (!err) return false;
+
+  const retryableNames = new Set([
+    "MongoNetworkError",
+    "MongoNetworkTimeoutError",
+    "MongoServerSelectionError",
+    "MongoTopologyClosedError",
+  ]);
+  if (retryableNames.has(err.name)) return true;
+
+  if (typeof err.hasErrorLabel === "function") {
+    if (err.hasErrorLabel("RetryableWriteError")) return true;
+    if (err.hasErrorLabel("TransientTransactionError")) return true;
+    if (err.hasErrorLabel("ResetPool")) return true;
+  }
+
+  const message = String(err.message || "");
+  return (
+    message.includes("timed out") ||
+    message.includes("ECONNRESET") ||
+    message.includes("connection") ||
+    message.includes("topology was destroyed")
+  );
+}
+
+async function closeMongoClientQuietly(client) {
+  if (!client) return;
+  try {
+    await client.close();
+  } catch (closeErr) {
+    console.warn("[MongoDB] close client warning:", closeErr.message || closeErr);
+  }
+}
+
+async function resetMongoClient(reason = "") {
+  const oldClient = mongoClient;
+  mongoClient = null;
+  mongoConnectPromise = null;
+  mongoIndexesEnsured = false;
+  await closeMongoClientQuietly(oldClient);
+  if (reason) {
+    console.warn(`[MongoDB] Client reset: ${reason}`);
+  }
+}
+
+async function withMongoRetry(label, operation, retryCount = MONGO_OPERATION_RETRY_COUNT) {
+  const maxAttempts = Math.max(retryCount, 0) + 1;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (err) {
+      lastError = err;
+      const retryable = isRetryableMongoError(err);
+      if (!retryable || attempt >= maxAttempts) {
+        throw err;
+      }
+      console.warn(`[MongoDB] ${label} failed (attempt ${attempt}/${maxAttempts}), retrying: ${err.message || err}`);
+      await resetMongoClient(`${label} attempt ${attempt}`);
+      await sleep(MONGO_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError;
+}
 
 async function connectDB() {
-  if (!mongoClient) {
-    // ข้อ 5: เพิ่ม connection pooling options เพื่อลด memory usage
-    mongoClient = new MongoClient(MONGO_URI, {
-      maxPoolSize: 10,           // จำกัด connections สูงสุด
-      minPoolSize: 2,            // รักษา connections ขั้นต่ำ
-      maxIdleTimeMS: 30000,      // ปิด idle connections หลัง 30 วินาที
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-    });
-    await mongoClient.connect();
-    console.log("MongoDB connected (global) with pooling.");
+  if (!MONGO_URI) {
+    throw new Error("MONGO_URI is not configured");
   }
-  return mongoClient;
+  if (mongoClient) return mongoClient;
+  if (mongoConnectPromise) return mongoConnectPromise;
+
+  const maxAttempts = MONGO_CONNECT_RETRY_COUNT + 1;
+  mongoConnectPromise = (async () => {
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let candidateClient = null;
+      try {
+        // ข้อ 5: เพิ่ม connection pooling options เพื่อลด memory usage
+        candidateClient = new MongoClient(MONGO_URI, {
+          maxPoolSize: 10,           // จำกัด connections สูงสุด
+          minPoolSize: 2,            // รักษา connections ขั้นต่ำ
+          maxIdleTimeMS: 30000,      // ปิด idle connections หลัง 30 วินาที
+          serverSelectionTimeoutMS: 5000,
+          socketTimeoutMS: 45000,
+          connectTimeoutMS: 10000,
+          retryReads: true,
+          retryWrites: true,
+        });
+        await candidateClient.connect();
+        await candidateClient.db("admin").command({ ping: 1 });
+        mongoClient = candidateClient;
+        console.log("MongoDB connected (global) with pooling.");
+        return mongoClient;
+      } catch (err) {
+        lastError = err;
+        await closeMongoClientQuietly(candidateClient);
+        console.error(`[MongoDB] connect attempt ${attempt}/${maxAttempts} failed:`, err.message || err);
+        if (!isRetryableMongoError(err) || attempt >= maxAttempts) {
+          throw err;
+        }
+        await sleep(MONGO_RETRY_DELAY_MS * attempt);
+      }
+    }
+    throw lastError;
+  })();
+
+  mongoConnectPromise = mongoConnectPromise.finally(() => {
+    mongoConnectPromise = null;
+  });
+
+  return mongoConnectPromise;
+}
+
+async function ensureMongoIndexes() {
+  if (mongoIndexesEnsured) return;
+
+  await withMongoRetry("ensureMongoIndexes", async () => {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+
+    const indexDefinitions = [
+      { collection: "chat_history", keys: { senderId: 1, timestamp: 1 }, options: { name: "senderId_1_timestamp_1" } },
+      { collection: "chat_history_summaries", keys: { senderId: 1 }, options: { name: "senderId_1" } },
+      { collection: "active_user_status", keys: { senderId: 1 }, options: { name: "senderId_1" } },
+      { collection: "user_page_mapping", keys: { userId: 1 }, options: { name: "userId_1" } },
+      { collection: "customer_order_status", keys: { orderStatus: 1, followupDisabled: 1, followupIndex: 1 }, options: { name: "orderStatus_1_followupDisabled_1_followupIndex_1" } },
+      { collection: "orders", keys: { userId: 1, phone: 1, promotion: 1, createdAt: -1 }, options: { name: "userId_1_phone_1_promotion_1_createdAt_-1" } },
+    ];
+
+    if (ENABLE_ORDER_CHAT_HISTORY) {
+      indexDefinitions.push({
+        collection: "order_chat_history",
+        keys: { senderId: 1, timestamp: 1 },
+        options: { name: "senderId_1_timestamp_1" },
+      });
+    }
+
+    for (const idx of indexDefinitions) {
+      try {
+        await db.collection(idx.collection).createIndex(idx.keys, idx.options);
+      } catch (err) {
+        console.error(`[MongoDB] Failed to ensure index ${idx.collection}.${idx.options.name}:`, err.message || err);
+      }
+    }
+  });
+
+  mongoIndexesEnsured = true;
 }
 
 function stripRichContentForStorage(content) {
@@ -478,76 +662,75 @@ async function upsertChatSummary(userId, messages) {
 
 async function pruneChatHistory(userId) {
   if (CHAT_HISTORY_MAX_MESSAGES <= 0) return;
+  await withMongoRetry("pruneChatHistory", async () => {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("chat_history");
 
-  const client = await connectDB();
-  const db = client.db("chatbot");
-  const coll = db.collection("chat_history");
+    const total = await coll.countDocuments({ senderId: userId });
+    const overflow = total - CHAT_HISTORY_MAX_MESSAGES;
+    if (overflow <= 0) return;
 
-  const total = await coll.countDocuments({ senderId: userId });
-  const overflow = total - CHAT_HISTORY_MAX_MESSAGES;
-  if (overflow <= 0) return;
+    const canSummarize = ENABLE_CHAT_SUMMARY && OPENAI_API_KEY;
+    const batchSize = Math.max(CHAT_HISTORY_SUMMARY_MIN_BATCH, 1);
+    let pruneCount = overflow;
+    if (canSummarize && batchSize > 1) {
+      if (total <= CHAT_HISTORY_MAX_MESSAGES + batchSize - 1) return;
+      pruneCount = batchSize;
+    }
 
-  const canSummarize = ENABLE_CHAT_SUMMARY && OPENAI_API_KEY;
-  const batchSize = Math.max(CHAT_HISTORY_SUMMARY_MIN_BATCH, 1);
-  let pruneCount = overflow;
-  if (canSummarize && batchSize > 1) {
-    if (total <= CHAT_HISTORY_MAX_MESSAGES + batchSize - 1) return;
-    pruneCount = batchSize;
-  }
+    const messagesToPrune = await coll.find({ senderId: userId })
+      .sort({ timestamp: 1 })
+      .limit(pruneCount)
+      .toArray();
 
-  const messagesToPrune = await coll.find({ senderId: userId })
-    .sort({ timestamp: 1 })
-    .limit(pruneCount)
-    .toArray();
+    if (messagesToPrune.length === 0) return;
 
-  if (messagesToPrune.length === 0) return;
+    if (canSummarize) {
+      await upsertChatSummary(userId, messagesToPrune);
+    }
 
-  if (canSummarize) {
-    await upsertChatSummary(userId, messagesToPrune);
-  }
-
-  await coll.deleteMany({ _id: { $in: messagesToPrune.map(msg => msg._id) } });
+    await coll.deleteMany({ _id: { $in: messagesToPrune.map(msg => msg._id) } });
+  });
 }
 
 async function getChatHistory(userId) {
-  const client = await connectDB();
-  const db = client.db("chatbot");
-  const coll = db.collection("chat_history");
-  const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
+  return withMongoRetry("getChatHistory", async () => {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("chat_history");
+    const chats = await coll.find({ senderId: userId }).sort({ timestamp: 1 }).toArray();
 
-  const summaries = db.collection("chat_history_summaries");
-  const summaryDoc = await summaries.findOne({ senderId: userId });
+    const summaries = db.collection("chat_history_summaries");
+    const summaryDoc = await summaries.findOne({ senderId: userId });
 
-  const history = chats.map(ch => {
-    let content = parseStoredContent(ch.content);
+    const history = chats.map(ch => {
+      let content = parseStoredContent(ch.content);
 
-    // เพิ่ม timestamp เฉพาะข้อความฝั่งลูกค้า (role === "user")
-    if (ch.role === "user") {
-      const timeStr = formatTimestampThai(ch.timestamp);
-      if (typeof content === "string") {
-        content = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content}`;
-      } else if (Array.isArray(content) && content.length > 0 && content[0].text) {
-        content = [...content];
-        content[0] = { ...content[0], text: `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content[0].text}` };
-      } else {
-        content = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${JSON.stringify(content)}`;
+      // เพิ่ม timestamp เฉพาะข้อความฝั่งลูกค้า (role === "user")
+      if (ch.role === "user") {
+        const timeStr = formatTimestampThai(ch.timestamp);
+        if (typeof content === "string") {
+          content = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content}`;
+        } else if (Array.isArray(content) && content.length > 0 && content[0].text) {
+          content = [...content];
+          content[0] = { ...content[0], text: `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${content[0].text}` };
+        } else {
+          content = `[ข้อความนี้ส่งเมื่อ ${timeStr}] ${JSON.stringify(content)}`;
+        }
       }
+
+      return { role: ch.role, content };
+    });
+
+    if (summaryDoc && summaryDoc.summary) {
+      history.unshift({ role: "system", content: `สรุปการสนทนาก่อนหน้า: ${summaryDoc.summary}` });
     }
-
-    return { role: ch.role, content };
+    return history;
   });
-
-  if (summaryDoc && summaryDoc.summary) {
-    history.unshift({ role: "system", content: `สรุปการสนทนาก่อนหน้า: ${summaryDoc.summary}` });
-  }
-  return history;
 }
 
 async function saveChatHistory(userId, messageContent, role = "user") {
-  const client = await connectDB();
-  const db = client.db("chatbot");
-  const coll = db.collection("chat_history");
-
   const sanitized = sanitizeContentForStorage(messageContent);
   let msgToSave;
   if (typeof sanitized === "string") {
@@ -557,11 +740,16 @@ async function saveChatHistory(userId, messageContent, role = "user") {
   }
 
   console.log(`[DEBUG] Saving chat history => role=${role}`);
-  await coll.insertOne({
-    senderId: userId,
-    role,
-    content: msgToSave,
-    timestamp: new Date(),
+  await withMongoRetry("saveChatHistory.insertOne", async () => {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("chat_history");
+    await coll.insertOne({
+      senderId: userId,
+      role,
+      content: msgToSave,
+      timestamp: new Date(),
+    });
   });
   console.log(`[DEBUG] Saved message. userId=${userId}, role=${role}`);
   pruneChatHistory(userId).catch(err => {
@@ -570,29 +758,52 @@ async function saveChatHistory(userId, messageContent, role = "user") {
 }
 
 async function getUserStatus(userId) {
-  const client = await connectDB();
-  const db = client.db("chatbot");
-  const coll = db.collection("active_user_status");
+  return withMongoRetry("getUserStatus", async () => {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("active_user_status");
 
-  let userStatus = await coll.findOne({ senderId: userId });
-  if (!userStatus) {
-    userStatus = { senderId: userId, aiEnabled: true, updatedAt: new Date() };
-    await coll.insertOne(userStatus);
-  }
-  return userStatus;
+    let userStatus = await coll.findOne({ senderId: userId });
+    if (!userStatus) {
+      userStatus = {
+        senderId: userId,
+        aiEnabled: true,
+        welcomeMessageEnabled: true,
+        updatedAt: new Date()
+      };
+      await coll.insertOne(userStatus);
+    } else if (typeof userStatus.welcomeMessageEnabled !== "boolean") {
+      userStatus.welcomeMessageEnabled = true;
+      userStatus.updatedAt = new Date();
+      await coll.updateOne(
+        { senderId: userId },
+        { $set: { welcomeMessageEnabled: true, updatedAt: userStatus.updatedAt } }
+      );
+    }
+    return userStatus;
+  });
 }
 
-async function setUserStatus(userId, aiEnabled) {
-  console.log(`[DEBUG] setUserStatus: userId=${userId}, aiEnabled=${aiEnabled}`);
-  const client = await connectDB();
-  const db = client.db("chatbot");
-  const coll = db.collection("active_user_status");
+async function setUserStatus(userId, aiEnabled, options = {}) {
+  console.log(`[DEBUG] setUserStatus: userId=${userId}, aiEnabled=${aiEnabled}, options=`, options);
+  const setPayload = {
+    aiEnabled,
+    updatedAt: new Date()
+  };
+  if (typeof options.welcomeMessageEnabled === "boolean") {
+    setPayload.welcomeMessageEnabled = options.welcomeMessageEnabled;
+  }
 
-  await coll.updateOne(
-    { senderId: userId },
-    { $set: { aiEnabled, updatedAt: new Date() } },
-    { upsert: true }
-  );
+  await withMongoRetry("setUserStatus", async () => {
+    const client = await connectDB();
+    const db = client.db("chatbot");
+    const coll = db.collection("active_user_status");
+    await coll.updateOne(
+      { senderId: userId },
+      { $set: setPayload },
+      { upsert: true }
+    );
+  });
 }
 
 /*******************************************************
@@ -653,35 +864,39 @@ async function getCustomerOrderStatus(userId) {
 
 async function updateCustomerOrderStatus(userId, status) {
   console.log(`[DEBUG] updateCustomerOrderStatus: userId=${userId}, status=${status}`);
-  const client = await connectDB();
-  const db = client.db("chatbot");
-  const coll = db.collection("customer_order_status");
-
-  await coll.updateOne(
-    { senderId: userId },
-    { $set: { orderStatus: status, updatedAt: new Date() } },
-    { upsert: true }
-  );
-}
-
-async function updateFollowupData(userId, followupIndex, lastFollowupDate) {
-  console.log(`[DEBUG] updateFollowupData => userId=${userId}, followupIndex=${followupIndex}`);
-  try {
+  await withMongoRetry("updateCustomerOrderStatus", async () => {
     const client = await connectDB();
     const db = client.db("chatbot");
     const coll = db.collection("customer_order_status");
 
     await coll.updateOne(
       { senderId: userId },
-      {
-        $set: {
-          followupIndex,
-          lastFollowupAt: lastFollowupDate,
-          updatedAt: new Date()
-        }
-      },
+      { $set: { orderStatus: status, updatedAt: new Date() } },
       { upsert: true }
     );
+  });
+}
+
+async function updateFollowupData(userId, followupIndex, lastFollowupDate) {
+  console.log(`[DEBUG] updateFollowupData => userId=${userId}, followupIndex=${followupIndex}`);
+  try {
+    await withMongoRetry("updateFollowupData", async () => {
+      const client = await connectDB();
+      const db = client.db("chatbot");
+      const coll = db.collection("customer_order_status");
+
+      await coll.updateOne(
+        { senderId: userId },
+        {
+          $set: {
+            followupIndex,
+            lastFollowupAt: lastFollowupDate,
+            updatedAt: new Date()
+          }
+        },
+        { upsert: true }
+      );
+    });
   } catch (err) {
     console.error("updateFollowupData error:", err);
   }
@@ -691,30 +906,32 @@ async function updateFollowupData(userId, followupIndex, lastFollowupDate) {
 async function disableFollowupForUser(userId) {
   console.log(`[DEBUG] disableFollowupForUser => userId=${userId}`);
   try {
-    const client = await connectDB();
-    const db = client.db("chatbot");
-    const coll = db.collection("customer_order_status");
+    await withMongoRetry("disableFollowupForUser", async () => {
+      const client = await connectDB();
+      const db = client.db("chatbot");
+      const coll = db.collection("customer_order_status");
 
-    // ตรวจสอบก่อนอัปเดต
-    const beforeDoc = await coll.findOne({ senderId: userId });
-    console.log(`[DEBUG] Before disableFollowupForUser: userId=${userId}, data=`, beforeDoc);
+      // ตรวจสอบก่อนอัปเดต
+      const beforeDoc = await coll.findOne({ senderId: userId });
+      console.log(`[DEBUG] Before disableFollowupForUser: userId=${userId}, data=`, beforeDoc);
 
-    const result = await coll.updateOne(
-      { senderId: userId },
-      {
-        $set: {
-          followupDisabled: true,
-          followupDisabledAt: new Date(),
-          updatedAt: new Date()
-        }
-      },
-      { upsert: true }
-    );
+      const result = await coll.updateOne(
+        { senderId: userId },
+        {
+          $set: {
+            followupDisabled: true,
+            followupDisabledAt: new Date(),
+            updatedAt: new Date()
+          }
+        },
+        { upsert: true }
+      );
 
-    // ตรวจสอบหลังอัปเดต
-    const afterDoc = await coll.findOne({ senderId: userId });
-    console.log(`[DEBUG] After disableFollowupForUser: userId=${userId}, data=`, afterDoc);
-    console.log(`[DEBUG] disableFollowupForUser result: matched=${result.matchedCount}, modified=${result.modifiedCount}, upserted=${result.upsertedCount}`);
+      // ตรวจสอบหลังอัปเดต
+      const afterDoc = await coll.findOne({ senderId: userId });
+      console.log(`[DEBUG] After disableFollowupForUser: userId=${userId}, data=`, afterDoc);
+      console.log(`[DEBUG] disableFollowupForUser result: matched=${result.matchedCount}, modified=${result.modifiedCount}, upserted=${result.upsertedCount}`);
+    });
 
     return true;
   } catch (err) {
@@ -725,36 +942,40 @@ async function disableFollowupForUser(userId) {
 
 async function updateLastUserReplyAt(userId, dateObj) {
   console.log(`[DEBUG] updateLastUserReplyAt => userId=${userId}, date=${dateObj}`);
-  const client = await connectDB();
-  const db = client.db("chatbot");
-  const coll = db.collection("customer_order_status");
-
-  await coll.updateOne(
-    { senderId: userId },
-    { $set: { lastUserReplyAt: dateObj, updatedAt: new Date() } },
-    { upsert: true }
-  );
-}
-
-// เพิ่มฟังก์ชันสำหรับเปิดใช้งาน followup อีกครั้ง
-async function enableFollowupForUser(userId) {
-  console.log(`[DEBUG] enableFollowupForUser => userId=${userId}`);
-  try {
+  await withMongoRetry("updateLastUserReplyAt", async () => {
     const client = await connectDB();
     const db = client.db("chatbot");
     const coll = db.collection("customer_order_status");
 
     await coll.updateOne(
       { senderId: userId },
-      {
-        $set: {
-          followupDisabled: false,
-          followupEnabledAt: new Date(),
-          updatedAt: new Date()
-        }
-      },
+      { $set: { lastUserReplyAt: dateObj, updatedAt: new Date() } },
       { upsert: true }
     );
+  });
+}
+
+// เพิ่มฟังก์ชันสำหรับเปิดใช้งาน followup อีกครั้ง
+async function enableFollowupForUser(userId) {
+  console.log(`[DEBUG] enableFollowupForUser => userId=${userId}`);
+  try {
+    await withMongoRetry("enableFollowupForUser", async () => {
+      const client = await connectDB();
+      const db = client.db("chatbot");
+      const coll = db.collection("customer_order_status");
+
+      await coll.updateOne(
+        { senderId: userId },
+        {
+          $set: {
+            followupDisabled: false,
+            followupEnabledAt: new Date(),
+            updatedAt: new Date()
+          }
+        },
+        { upsert: true }
+      );
+    });
     return true;
   } catch (err) {
     console.error("enableFollowupForUser error:", err);
@@ -1620,11 +1841,12 @@ app.get('/webhook', (req, res) => {
 });
 
 app.post('/webhook', async (req, res) => {
-  if (req.body.object === 'page') {
-    for (const entry of req.body.entry) {
-      if (!entry.messaging || entry.messaging.length === 0) {
-        continue;
-      }
+  try {
+    if (req.body.object === 'page') {
+      for (const entry of req.body.entry) {
+        if (!entry.messaging || entry.messaging.length === 0) {
+          continue;
+        }
 
       const pageId = entry.id;
 
@@ -1689,20 +1911,30 @@ app.post('/webhook', async (req, res) => {
           const attachments = webhookEvent.message.attachments;
 
           if (isEcho) {
-            if (textMsg === "แอดมิน THAYA รอให้คำปรึกษาค่ะ") {
-              await setUserStatus(userId, false);
+            const normalizedTextMsg = normalizeCommandText(textMsg);
+            const hasDisableAiKeyword = hasAnyKeyword(normalizedTextMsg, ADMIN_DISABLE_AI_KEYWORDS);
+            const hasEnableAiKeyword = hasAnyKeyword(normalizedTextMsg, ADMIN_ENABLE_AI_KEYWORDS);
+
+            if (hasDisableAiKeyword && !hasEnableAiKeyword) {
+              await setUserStatus(userId, false, { welcomeMessageEnabled: false });
+              const followupDisabled = await disableFollowupForUser(userId);
+              if (!followupDisabled) {
+                console.error(`[ERROR] Failed to disable followup while disabling AI for userId=${userId}`);
+              }
               await saveChatHistory(userId, textMsg, "assistant");
-              await sendSimpleTextMessage(userId, "ลูกค้าสนใจอยากปรึกษาด้านไหนดีคะ", pageKey);
               continue;
             }
-            else if (textMsg === "แอดมิน THAYA ยินดีดูแลลูกค้าค่ะ") {
-              await setUserStatus(userId, true);
+            else if (hasEnableAiKeyword) {
+              await setUserStatus(userId, true, { welcomeMessageEnabled: true });
+              const followupEnabled = await enableFollowupForUser(userId);
+              if (!followupEnabled) {
+                console.error(`[ERROR] Failed to enable followup while enabling AI for userId=${userId}`);
+              }
               await saveChatHistory(userId, textMsg, "assistant");
-              await sendSimpleTextMessage(userId, "ขอบพระคุณที่ให้ THAYA ดูแลค่ะ", pageKey);
               continue;
             }
             // เพิ่มการตรวจสอบคีย์เวิร์ด "#รับออเดอร์" สำหรับปิด followup
-            else if (textMsg.includes("#รับออเดอร์")) {
+            else if (normalizedTextMsg.includes("#รับออเดอร์")) {
               // ในกรณีข้อความ echo จาก messenger 
               // webhookEvent.recipient.id คือ ID ของลูกค้าที่รับข้อความ
               // webhookEvent.sender.id คือ ID ของเพจที่ส่งข้อความ (pageId)
@@ -1741,10 +1973,16 @@ app.post('/webhook', async (req, res) => {
           const userStatus = await getUserStatus(userId);
           const aiEnabled = userStatus.aiEnabled;
 
-          await updateLastUserReplyAt(userId, new Date());
-
           if (textMsg && !attachments) {
             console.log(`[DEBUG] Received text from userId=${userId}, pageKey=${pageKey}:`, textMsg);
+
+            if (!aiEnabled) {
+              await saveChatHistory(userId, textMsg, "user");
+              await saveOrderChatHistory(userId, textMsg, "user");
+              continue;
+            }
+
+            await updateLastUserReplyAt(userId, new Date());
 
             // เพิ่มการตรวจสอบข้อความสำหรับปิด followup
             // ตรวจสอบคำสั่งปิด followup จากข้อความผู้ใช้ หรือจากแอดมิน
@@ -1802,15 +2040,8 @@ app.post('/webhook', async (req, res) => {
                 }
 
                 if (success) {
-                  const action = hasDisableKeyword ? "ปิด" : "เปิด";
-                  const confirmMsg = `ระบบได้${action}การส่งข้อความติดตามสำหรับผู้ใช้ ${targetUserId} เรียบร้อยแล้วค่ะ`;
-                  await sendSimpleTextMessage(userId, confirmMsg, pageKey);
-                  await saveChatHistory(userId, confirmMsg, "assistant");
                   console.log(`[DEBUG] Successfully ${hasDisableKeyword ? 'disabled' : 'enabled'} followup for targetUserId=${targetUserId}`);
                 } else {
-                  const confirmMsg = `ไม่สามารถ${hasDisableKeyword ? 'ปิด' : 'เปิด'}การส่งข้อความติดตามสำหรับผู้ใช้ ${targetUserId} ได้ค่ะ`;
-                  await sendSimpleTextMessage(userId, confirmMsg, pageKey);
-                  await saveChatHistory(userId, confirmMsg, "assistant");
                   console.error(`[ERROR] Failed to ${hasDisableKeyword ? 'disable' : 'enable'} followup for targetUserId=${targetUserId}`);
                 }
 
@@ -1821,9 +2052,6 @@ app.post('/webhook', async (req, res) => {
               const success = await disableFollowupForUser(userId);
 
               if (success) {
-                const confirmMsg = "ระบบได้ปิดการส่งข้อความติดตามสำหรับผู้ใช้นี้แล้วค่ะ";
-                await sendSimpleTextMessage(userId, confirmMsg, pageKey);
-                await saveChatHistory(userId, confirmMsg, "assistant");
                 console.log(`[DEBUG] Successfully disabled followup for userId=${userId}`);
               } else {
                 console.error(`[ERROR] Failed to disable followup for userId=${userId}`);
@@ -1833,9 +2061,6 @@ app.post('/webhook', async (req, res) => {
               const success = await enableFollowupForUser(userId);
 
               if (success) {
-                const confirmMsg = "ระบบได้เปิดการส่งข้อความติดตามสำหรับผู้ใช้นี้อีกครั้งแล้วค่ะ";
-                await sendSimpleTextMessage(userId, confirmMsg, pageKey);
-                await saveChatHistory(userId, confirmMsg, "assistant");
                 console.log(`[DEBUG] Successfully enabled followup for userId=${userId}`);
               } else {
                 console.error(`[ERROR] Failed to enable followup for userId=${userId}`);
@@ -1852,11 +2077,6 @@ app.post('/webhook', async (req, res) => {
             await saveChatHistory(userId, textMsg, "user");
             // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
             await saveOrderChatHistory(userId, textMsg, "user");
-
-            if (!aiEnabled) {
-              await analyzeConversationForStatusChange(userId);
-              continue;
-            }
 
             const history = await getChatHistory(userId);
             const systemInstructions = buildSystemInstructions();
@@ -1912,6 +2132,14 @@ app.post('/webhook', async (req, res) => {
             }
             // ==== จบส่วนแก้ไข attachments ====
 
+            if (!aiEnabled) {
+              await saveChatHistory(userId, userContentArray, "user");
+              await saveOrderChatHistory(userId, userContentArray, "user");
+              continue;
+            }
+
+            await updateLastUserReplyAt(userId, new Date());
+
             // ตรวจสอบผู้ใช้ใหม่และส่งข้อความเริ่มต้น (ก่อนการบันทึกข้อความ)
             const isNewUser = await checkAndSendWelcomeMessage(userId, pageKey);
             if (isNewUser) {
@@ -1922,11 +2150,6 @@ app.post('/webhook', async (req, res) => {
             await saveChatHistory(userId, userContentArray, "user");
             // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
             await saveOrderChatHistory(userId, userContentArray, "user");
-
-            if (!aiEnabled) {
-              await analyzeConversationForStatusChange(userId);
-              continue;
-            }
 
             const history = await getChatHistory(userId);
             const systemInstructions = buildSystemInstructions();
@@ -1948,9 +2171,15 @@ app.post('/webhook', async (req, res) => {
         }
       }
     }
-    res.status(200).send("EVENT_RECEIVED");
-  } else {
-    res.sendStatus(404);
+    return res.status(200).send("EVENT_RECEIVED");
+    }
+
+    return res.sendStatus(404);
+  } catch (err) {
+    console.error("[Webhook ERROR] Unhandled processing error:", err);
+    if (!res.headersSent) {
+      return res.status(200).send("EVENT_RECEIVED");
+    }
   }
 });
 
@@ -1965,13 +2194,13 @@ app.listen(PORT, async () => {
 
   try {
     await connectDB();
+    await ensureMongoIndexes();
     await fetchGoogleDocInstructions();
 
     const rows = await fetchSheetData(SPREADSHEET_ID, SHEET_RANGE);
     sheetJSON = transformSheetRowsToJSON(rows);
 
     await loadFollowupData();
-
     startFollowupScheduler();
 
     console.log("[DEBUG] Startup completed. Ready to receive webhooks.");
@@ -1985,15 +2214,17 @@ app.listen(PORT, async () => {
 async function saveUserPageMapping(userId, pageKey) {
   try {
     console.log(`[DEBUG] saveUserPageMapping: userId=${userId}, pageKey=${pageKey}`);
-    const client = await connectDB();
-    const db = client.db("chatbot");
-    const coll = db.collection("user_page_mapping");
+    await withMongoRetry("saveUserPageMapping", async () => {
+      const client = await connectDB();
+      const db = client.db("chatbot");
+      const coll = db.collection("user_page_mapping");
 
-    await coll.updateOne(
-      { userId },
-      { $set: { pageKey, updatedAt: new Date() } },
-      { upsert: true }
-    );
+      await coll.updateOne(
+        { userId },
+        { $set: { pageKey, updatedAt: new Date() } },
+        { upsert: true }
+      );
+    });
   } catch (err) {
     console.error("saveUserPageMapping error:", err);
   }
@@ -2051,13 +2282,20 @@ function isValidThaiPhoneNumber(phone) {
 // เพิ่มฟังก์ชันสำหรับตรวจสอบผู้ใช้ใหม่และส่งข้อความเริ่มต้น
 async function checkAndSendWelcomeMessage(userId, pageKey = 'default') {
   try {
-    console.log(`[DEBUG] Checking if user ${userId} is new...`);
-    const client = await connectDB();
-    const db = client.db("chatbot");
-    const coll = db.collection("chat_history");
+    const userStatus = await getUserStatus(userId);
+    if (userStatus.welcomeMessageEnabled === false) {
+      console.log(`[DEBUG] Welcome message disabled for userId=${userId}`);
+      return false;
+    }
 
-    // ตรวจสอบว่ามีประวัติการสนทนาหรือไม่
-    const chatCount = await coll.countDocuments({ senderId: userId });
+    console.log(`[DEBUG] Checking if user ${userId} is new...`);
+    const chatCount = await withMongoRetry("checkAndSendWelcomeMessage.countDocuments", async () => {
+      const client = await connectDB();
+      const db = client.db("chatbot");
+      const coll = db.collection("chat_history");
+      // ตรวจสอบว่ามีประวัติการสนทนาหรือไม่
+      return coll.countDocuments({ senderId: userId });
+    });
 
     if (chatCount === 0) {
       console.log(`[DEBUG] New user detected: ${userId}. Sending welcome message...`);
