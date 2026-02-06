@@ -6,7 +6,8 @@
 const express = require('express');
 const path = require('path');
 const { google } = require('googleapis');
-const { ObjectId } = require('mongodb');
+const { randomUUID } = require('crypto');
+const { query } = require('./db/postgres');
 
 const router = express.Router();
 
@@ -18,18 +19,23 @@ const GOOGLE_DOC_ID = process.env.GOOGLE_DOC_ID || "1IDvCXWa_5QllMTKrVSvhLRQPNNG
 const SPREADSHEET_ID = process.env.INSTRUCTION_SPREADSHEET_ID || "1esN_P6JuPzYUGesR60zVuIGeuvSnRM1hlyaxCJbhI_c";
 const SHEET_RANGE = "ชีต1!A2:B28";
 
-// MongoDB connection จะใช้จาก main app
-let getDBCollection = null;
-
-// Set DB connection function from main app
-function setDBConnection(connectFn) {
-    getDBCollection = connectFn;
+function setDBConnection() {
+    // no-op for postgres (kept for backward compatibility)
 }
 
-async function getVersionsCollection() {
-    if (!getDBCollection) throw new Error('DB connection not set');
-    const client = await getDBCollection();
-    return client.db('chatbot').collection('instruction_versions');
+function mapVersionRow(row) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        name: row.name,
+        description: row.description || '',
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        googleDoc: row.google_doc || '',
+        sheetData: row.sheet_data || [],
+        staticInstructions: row.static_instructions || '',
+        isActive: row.is_active === true
+    };
 }
 
 // ====================== Google API Functions ======================
@@ -109,9 +115,10 @@ function estimateTokens(text) {
 // Get all versions
 router.get('/versions', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-        const versions = await collection.find({}).sort({ createdAt: -1 }).toArray();
-        res.json(versions.map(v => ({ ...v, id: v._id.toString() })));
+        const result = await query(
+            `SELECT * FROM instruction_versions ORDER BY created_at DESC`
+        );
+        res.json((result.rows || []).map(mapVersionRow));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -143,19 +150,16 @@ router.get('/default', async (req, res) => {
 // Get a specific version
 router.get('/versions/:id', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-        let version;
-
-        try {
-            version = await collection.findOne({ _id: new ObjectId(req.params.id) });
-        } catch {
-            version = await collection.findOne({ id: req.params.id });
-        }
+        const result = await query(
+            `SELECT * FROM instruction_versions WHERE id = $1`,
+            [req.params.id]
+        );
+        const version = result.rows?.[0];
 
         if (!version) {
             return res.status(404).json({ error: 'Version not found' });
         }
-        res.json({ ...version, id: version._id.toString() });
+        res.json(mapVersionRow(version));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -164,22 +168,40 @@ router.get('/versions/:id', async (req, res) => {
 // Create new version
 router.post('/versions', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-        const count = await collection.countDocuments();
+        const countResult = await query(`SELECT COUNT(*)::int AS total FROM instruction_versions`);
+        const count = countResult.rows?.[0]?.total || 0;
+        const now = new Date();
 
         const newVersion = {
+            id: randomUUID(),
             name: req.body.name || `Version ${count + 1}`,
             description: req.body.description || '',
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            createdAt: now,
+            updatedAt: now,
             googleDoc: req.body.googleDoc || '',
             sheetData: req.body.sheetData || [],
             staticInstructions: req.body.staticInstructions || '',
             isActive: false
         };
 
-        const result = await collection.insertOne(newVersion);
-        res.json({ ...newVersion, id: result.insertedId.toString() });
+        await query(
+            `INSERT INTO instruction_versions
+              (id, name, description, created_at, updated_at, google_doc, sheet_data, static_instructions, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+                newVersion.id,
+                newVersion.name,
+                newVersion.description,
+                newVersion.createdAt,
+                newVersion.updatedAt,
+                newVersion.googleDoc,
+                newVersion.sheetData,
+                newVersion.staticInstructions,
+                newVersion.isActive
+            ]
+        );
+
+        res.json(newVersion);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -188,31 +210,52 @@ router.post('/versions', async (req, res) => {
 // Update version
 router.put('/versions/:id', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-
         const updateData = { ...req.body, updatedAt: new Date() };
         delete updateData.id;
         delete updateData._id;
 
-        let result;
-        try {
-            result = await collection.findOneAndUpdate(
-                { _id: new ObjectId(req.params.id) },
-                { $set: updateData },
-                { returnDocument: 'after' }
-            );
-        } catch {
-            result = await collection.findOneAndUpdate(
-                { id: req.params.id },
-                { $set: updateData },
-                { returnDocument: 'after' }
-            );
+        const fields = [];
+        const values = [];
+        let idx = 1;
+
+        if ('name' in updateData) {
+            fields.push(`name = $${idx++}`);
+            values.push(updateData.name);
+        }
+        if ('description' in updateData) {
+            fields.push(`description = $${idx++}`);
+            values.push(updateData.description);
+        }
+        if ('googleDoc' in updateData) {
+            fields.push(`google_doc = $${idx++}`);
+            values.push(updateData.googleDoc);
+        }
+        if ('sheetData' in updateData) {
+            fields.push(`sheet_data = $${idx++}`);
+            values.push(updateData.sheetData);
+        }
+        if ('staticInstructions' in updateData) {
+            fields.push(`static_instructions = $${idx++}`);
+            values.push(updateData.staticInstructions);
+        }
+        if ('isActive' in updateData) {
+            fields.push(`is_active = $${idx++}`);
+            values.push(Boolean(updateData.isActive));
         }
 
-        if (!result) {
+        fields.push(`updated_at = $${idx++}`);
+        values.push(updateData.updatedAt);
+        values.push(req.params.id);
+
+        const result = await query(
+            `UPDATE instruction_versions SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+            values
+        );
+
+        if (!result.rows?.[0]) {
             return res.status(404).json({ error: 'Version not found' });
         }
-        res.json({ ...result, id: result._id.toString() });
+        res.json(mapVersionRow(result.rows[0]));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -221,16 +264,11 @@ router.put('/versions/:id', async (req, res) => {
 // Delete version
 router.delete('/versions/:id', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-
-        let result;
-        try {
-            result = await collection.deleteOne({ _id: new ObjectId(req.params.id) });
-        } catch {
-            result = await collection.deleteOne({ id: req.params.id });
-        }
-
-        res.json({ success: result.deletedCount > 0 });
+        const result = await query(
+            `DELETE FROM instruction_versions WHERE id = $1`,
+            [req.params.id]
+        );
+        res.json({ success: result.rowCount > 0 });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -239,21 +277,8 @@ router.delete('/versions/:id', async (req, res) => {
 // Set active version
 router.post('/versions/:id/activate', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-
-        await collection.updateMany({}, { $set: { isActive: false } });
-
-        try {
-            await collection.updateOne(
-                { _id: new ObjectId(req.params.id) },
-                { $set: { isActive: true } }
-            );
-        } catch {
-            await collection.updateOne(
-                { id: req.params.id },
-                { $set: { isActive: true } }
-            );
-        }
+        await query(`UPDATE instruction_versions SET is_active = false`);
+        await query(`UPDATE instruction_versions SET is_active = true WHERE id = $1`, [req.params.id]);
 
         res.json({ success: true });
     } catch (err) {
@@ -304,14 +329,11 @@ ${staticInstructions}`.trim();
 // Export version as JSON
 router.get('/versions/:id/export', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-        let version;
-
-        try {
-            version = await collection.findOne({ _id: new ObjectId(req.params.id) });
-        } catch {
-            version = await collection.findOne({ id: req.params.id });
-        }
+        const result = await query(
+            `SELECT * FROM instruction_versions WHERE id = $1`,
+            [req.params.id]
+        );
+        const version = result.rows?.[0];
 
         if (!version) {
             return res.status(404).json({ error: 'Version not found' });
@@ -319,7 +341,7 @@ router.get('/versions/:id/export', async (req, res) => {
 
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', `attachment; filename=instruction-${version.name.replace(/\s+/g, '-')}.json`);
-        res.json({ ...version, id: version._id.toString() });
+        res.json(mapVersionRow(version));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -329,21 +351,36 @@ router.get('/versions/:id/export', async (req, res) => {
 router.post('/import', async (req, res) => {
     try {
         const importedVersion = req.body;
-        const collection = await getVersionsCollection();
-
+        const now = new Date();
         const newVersion = {
+            id: randomUUID(),
             name: `${importedVersion.name} (Imported)`,
             description: importedVersion.description || '',
             googleDoc: importedVersion.googleDoc || '',
             sheetData: importedVersion.sheetData || [],
             staticInstructions: importedVersion.staticInstructions || '',
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            createdAt: now,
+            updatedAt: now,
             isActive: false
         };
 
-        const result = await collection.insertOne(newVersion);
-        res.json({ ...newVersion, id: result.insertedId.toString() });
+        await query(
+            `INSERT INTO instruction_versions
+              (id, name, description, created_at, updated_at, google_doc, sheet_data, static_instructions, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+                newVersion.id,
+                newVersion.name,
+                newVersion.description,
+                newVersion.createdAt,
+                newVersion.updatedAt,
+                newVersion.googleDoc,
+                newVersion.sheetData,
+                newVersion.staticInstructions,
+                newVersion.isActive
+            ]
+        );
+        res.json(newVersion);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

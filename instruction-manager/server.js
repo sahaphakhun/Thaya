@@ -1,13 +1,14 @@
 /*******************************************************
  * Instruction Manager Server
- * จัดการ Instructions หลายเวอร์ชัน (ใช้ MongoDB)
+ * จัดการ Instructions หลายเวอร์ชัน (ใช้ PostgreSQL)
  *******************************************************/
 
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
-const { MongoClient, ObjectId } = require('mongodb');
+const { randomUUID } = require('crypto');
+const { connectDb, initSchema, query } = require('../db/postgres');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -16,7 +17,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const PORT = process.env.INSTRUCTION_PORT || 3001;
 
 // ====================== Config ======================
-const MONGO_URI = process.env.MONGO_URI;
+const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.PG_CONNECTION_STRING;
 const GOOGLE_CLIENT_EMAIL = "aitar-888@eminent-wares-446512-j8.iam.gserviceaccount.com";
 const GOOGLE_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDGhyeINArKZgaV\nitEcK+o89ilPYeRNTNZgJT7VNHB5hgNLLeAcFLJ7IlCIqTLMoJEnnoDQil6aKaz8\nExVL83uSXRrzk4zQvtt3tIP31+9wOCb9D4ZGWfVP1tD0qdD4WJ1qqg1j1/8879pH\nUeQGEMuCnyVbcQ3GbYQjyYb3wEz/Qv7kMVggF+MIaGGw2NQwM0XcufSFtyxvvX2S\nb8uGc1A8R+Dn/tmcgMODhbtEgcMg6yXI5Y26MPfDjVrEbk0lfCr7IGFJX4ASYeKl\n0jhm0RGb+aya2cb55auLN3VPO5MQ+cOp8gHBf5GiC/YgF1gbRgF5b7LgmENBxSfH\nb3WVQodLAgMBAAECggEACKB14M7LdekXZHyAQrZL0EitbzQknLv33Xyw2B3rvJ7M\nr4HM/nC4eBj7y+ciUc8GZQ+CWc2GzTHTa66+mwAia1qdYbPp3LuhGM4Leq5zn/o+\nA3rJuG6PS4qyUMy89msPXW5fSj/oE535QREiFKYP2dtlia2GI4xoag+x9uZwfMUO\nWKEe7tiUoZQEiGhwtjLq9lyST4kGGmlhNee9OyhDJcw4uCt8Cepr++hMDleWUF6c\nX0nbGmoSS0sZ5Boy8ATMhw/3luaOAlTUEz/nVDvbbWlNL9etwLKiAVw+AQXsPHNW\nNWF7gyEIsEi0qSM3PtA1X7IdReRXHqmfiZs0J3qSQQKBgQD1+Yj37Yuqj8hGi5PY\n+M0ieMdGcbUOmJsM1yUmBMV4bfaTiqm504P6DIYAqfDDWeozcHwcdpG1AfFAihEi\nh6lb0qRk8YaGbzvac8mWhwo/jDA5QB97fjFa6uwtlewZ0Er/U3QmOeVVnVC1y1b0\nrbJD5yjvI3ve+gpwAz0glpIMiwKBgQDOnpD7p7ylG4NQunqmzzdozrzZP0L6EZyE\n141st/Hsp9rtO9/ADuH6WhpirQ516l5LLv7mLPA8S9CF/cSdWF/7WlxBPjM8WRs9\nACFNBJIwUfjzPnvECmtsayzRlKuyCAspnNSkzgtdtvf2xI82Z3BGov9goZfu+D4A\n36b1qXsIQQKBgQCO1CojhO0vyjPKOuxL9hTvqmBUWFyBMD4AU8F/dQ/RYVDn1YG+\npMKi5Li/E+75EHH9EpkO0g7Do3AaQNG4UjwWVJcfAlxSHa8Mp2VsIdfilJ2/8KsX\nQ2yXVYh04/Rn/No/ro7oT4AKmcGu/nbstxuncEgFrH4WOOzspATPsn72BwKBgG5N\nBAT0NKbHm0B7bIKkWGYhB3vKY8zvnejk0WDaidHWge7nabkzuLtXYoKO9AtKxG/K\ndNUX5F+r8XO2V0HQLd0XDezecaejwgC8kwp0iD43ZHkmQBgVn+dPB6wSe94coSjj\nyjj4reSnipQ3tmRKsAtldIN3gI5YA3Gf85dtlHqBAoGAD5ePt7cmu3tDZhA3A8f9\no8mNPvqz/WGs7H2Qgjyfc3jUxEGhVt1Su7J1j+TppfkKtJIDKji6rVA9oIjZtpZT\ngxnU6hcYuiwbLh3wGEFIjP1XeYYILudqfWOEbwnxD1RgMkCqfSHf/niWlfiH6p3F\ndnBsLY/qXdKfS/OXyezAm4M=\n-----END PRIVATE KEY-----\n";
 
@@ -24,30 +25,28 @@ const GOOGLE_DOC_ID = "1IDvCXWa_5QllMTKrVSvhLRQPNNGkYgxb8byaDGGEhyU";
 const SPREADSHEET_ID = "1esN_P6JuPzYUGesR60zVuIGeuvSnRM1hlyaxCJbhI_c";
 const SHEET_RANGE = "ชีต1!A2:B28";
 
-// ====================== MongoDB Connection ======================
-let mongoClient = null;
-
-async function connectDB() {
-    if (mongoClient) return mongoClient;
-
-    if (!MONGO_URI) {
-        throw new Error('MONGO_URI is not configured');
+// ====================== PostgreSQL Connection ======================
+async function ensureDbReady() {
+    if (!DATABASE_URL) {
+        throw new Error('DATABASE_URL is not configured');
     }
-
-    mongoClient = new MongoClient(MONGO_URI);
-    await mongoClient.connect();
-    console.log('[MongoDB] Connected successfully');
-    return mongoClient;
+    await connectDb();
+    await initSchema();
 }
 
-async function getVersionsCollection() {
-    const client = await connectDB();
-    return client.db('chatbot').collection('instruction_versions');
-}
-
-async function getImagesCollection() {
-    const client = await connectDB();
-    return client.db('chatbot').collection('instruction_images');
+function mapVersionRow(row) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        name: row.name,
+        description: row.description || '',
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        googleDoc: row.google_doc || '',
+        sheetData: row.sheet_data || [],
+        staticInstructions: row.static_instructions || '',
+        isActive: row.is_active === true
+    };
 }
 
 // ====================== Google API Functions ======================
@@ -127,10 +126,10 @@ function estimateTokens(text) {
 // Get all versions
 app.get('/api/versions', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-        const versions = await collection.find({}).sort({ createdAt: -1 }).toArray();
-        // Convert _id to id for frontend compatibility
-        res.json(versions.map(v => ({ ...v, id: v._id.toString() })));
+        const result = await query(
+            `SELECT * FROM instruction_versions ORDER BY created_at DESC`
+        );
+        res.json((result.rows || []).map(mapVersionRow));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -162,20 +161,16 @@ app.get('/api/default', async (req, res) => {
 // Get a specific version
 app.get('/api/versions/:id', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-        let version;
-
-        // Try ObjectId first, then fallback to string id
-        try {
-            version = await collection.findOne({ _id: new ObjectId(req.params.id) });
-        } catch {
-            version = await collection.findOne({ id: req.params.id });
-        }
+        const result = await query(
+            `SELECT * FROM instruction_versions WHERE id = $1`,
+            [req.params.id]
+        );
+        const version = result.rows?.[0];
 
         if (!version) {
             return res.status(404).json({ error: 'Version not found' });
         }
-        res.json({ ...version, id: version._id.toString() });
+        res.json(mapVersionRow(version));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -184,22 +179,39 @@ app.get('/api/versions/:id', async (req, res) => {
 // Create new version
 app.post('/api/versions', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-        const count = await collection.countDocuments();
+        const countResult = await query(`SELECT COUNT(*)::int AS total FROM instruction_versions`);
+        const count = countResult.rows?.[0]?.total || 0;
+        const now = new Date();
 
         const newVersion = {
+            id: randomUUID(),
             name: req.body.name || `Version ${count + 1}`,
             description: req.body.description || '',
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            createdAt: now,
+            updatedAt: now,
             googleDoc: req.body.googleDoc || '',
             sheetData: req.body.sheetData || [],
             staticInstructions: req.body.staticInstructions || '',
             isActive: false
         };
 
-        const result = await collection.insertOne(newVersion);
-        res.json({ ...newVersion, id: result.insertedId.toString() });
+        await query(
+            `INSERT INTO instruction_versions
+              (id, name, description, created_at, updated_at, google_doc, sheet_data, static_instructions, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+                newVersion.id,
+                newVersion.name,
+                newVersion.description,
+                newVersion.createdAt,
+                newVersion.updatedAt,
+                newVersion.googleDoc,
+                newVersion.sheetData,
+                newVersion.staticInstructions,
+                newVersion.isActive
+            ]
+        );
+        res.json(newVersion);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -208,31 +220,52 @@ app.post('/api/versions', async (req, res) => {
 // Update version
 app.put('/api/versions/:id', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-
         const updateData = { ...req.body, updatedAt: new Date() };
         delete updateData.id;
         delete updateData._id;
 
-        let result;
-        try {
-            result = await collection.findOneAndUpdate(
-                { _id: new ObjectId(req.params.id) },
-                { $set: updateData },
-                { returnDocument: 'after' }
-            );
-        } catch {
-            result = await collection.findOneAndUpdate(
-                { id: req.params.id },
-                { $set: updateData },
-                { returnDocument: 'after' }
-            );
+        const fields = [];
+        const values = [];
+        let idx = 1;
+
+        if ('name' in updateData) {
+            fields.push(`name = $${idx++}`);
+            values.push(updateData.name);
+        }
+        if ('description' in updateData) {
+            fields.push(`description = $${idx++}`);
+            values.push(updateData.description);
+        }
+        if ('googleDoc' in updateData) {
+            fields.push(`google_doc = $${idx++}`);
+            values.push(updateData.googleDoc);
+        }
+        if ('sheetData' in updateData) {
+            fields.push(`sheet_data = $${idx++}`);
+            values.push(updateData.sheetData);
+        }
+        if ('staticInstructions' in updateData) {
+            fields.push(`static_instructions = $${idx++}`);
+            values.push(updateData.staticInstructions);
+        }
+        if ('isActive' in updateData) {
+            fields.push(`is_active = $${idx++}`);
+            values.push(Boolean(updateData.isActive));
         }
 
-        if (!result) {
+        fields.push(`updated_at = $${idx++}`);
+        values.push(updateData.updatedAt);
+        values.push(req.params.id);
+
+        const result = await query(
+            `UPDATE instruction_versions SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+            values
+        );
+
+        if (!result.rows?.[0]) {
             return res.status(404).json({ error: 'Version not found' });
         }
-        res.json({ ...result, id: result._id.toString() });
+        res.json(mapVersionRow(result.rows[0]));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -241,16 +274,11 @@ app.put('/api/versions/:id', async (req, res) => {
 // Delete version
 app.delete('/api/versions/:id', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-
-        let result;
-        try {
-            result = await collection.deleteOne({ _id: new ObjectId(req.params.id) });
-        } catch {
-            result = await collection.deleteOne({ id: req.params.id });
-        }
-
-        res.json({ success: result.deletedCount > 0 });
+        const result = await query(
+            `DELETE FROM instruction_versions WHERE id = $1`,
+            [req.params.id]
+        );
+        res.json({ success: result.rowCount > 0 });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -259,23 +287,8 @@ app.delete('/api/versions/:id', async (req, res) => {
 // Set active version
 app.post('/api/versions/:id/activate', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-
-        // Deactivate all versions first
-        await collection.updateMany({}, { $set: { isActive: false } });
-
-        // Activate the selected version
-        try {
-            await collection.updateOne(
-                { _id: new ObjectId(req.params.id) },
-                { $set: { isActive: true } }
-            );
-        } catch {
-            await collection.updateOne(
-                { id: req.params.id },
-                { $set: { isActive: true } }
-            );
-        }
+        await query(`UPDATE instruction_versions SET is_active = false`);
+        await query(`UPDATE instruction_versions SET is_active = true WHERE id = $1`, [req.params.id]);
 
         res.json({ success: true });
     } catch (err) {
@@ -326,14 +339,11 @@ ${staticInstructions}`.trim();
 // Export version as JSON
 app.get('/api/versions/:id/export', async (req, res) => {
     try {
-        const collection = await getVersionsCollection();
-        let version;
-
-        try {
-            version = await collection.findOne({ _id: new ObjectId(req.params.id) });
-        } catch {
-            version = await collection.findOne({ id: req.params.id });
-        }
+        const result = await query(
+            `SELECT * FROM instruction_versions WHERE id = $1`,
+            [req.params.id]
+        );
+        const version = result.rows?.[0];
 
         if (!version) {
             return res.status(404).json({ error: 'Version not found' });
@@ -341,7 +351,7 @@ app.get('/api/versions/:id/export', async (req, res) => {
 
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', `attachment; filename=instruction-${version.name.replace(/\s+/g, '-')}.json`);
-        res.json({ ...version, id: version._id.toString() });
+        res.json(mapVersionRow(version));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -351,21 +361,36 @@ app.get('/api/versions/:id/export', async (req, res) => {
 app.post('/api/import', async (req, res) => {
     try {
         const importedVersion = req.body;
-        const collection = await getVersionsCollection();
-
+        const now = new Date();
         const newVersion = {
+            id: randomUUID(),
             name: `${importedVersion.name} (Imported)`,
             description: importedVersion.description || '',
             googleDoc: importedVersion.googleDoc || '',
             sheetData: importedVersion.sheetData || [],
             staticInstructions: importedVersion.staticInstructions || '',
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            createdAt: now,
+            updatedAt: now,
             isActive: false
         };
 
-        const result = await collection.insertOne(newVersion);
-        res.json({ ...newVersion, id: result.insertedId.toString() });
+        await query(
+            `INSERT INTO instruction_versions
+              (id, name, description, created_at, updated_at, google_doc, sheet_data, static_instructions, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+                newVersion.id,
+                newVersion.name,
+                newVersion.description,
+                newVersion.createdAt,
+                newVersion.updatedAt,
+                newVersion.googleDoc,
+                newVersion.sheetData,
+                newVersion.staticInstructions,
+                newVersion.isActive
+            ]
+        );
+        res.json(newVersion);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -511,6 +536,11 @@ app.post('/api/images/generate-key', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-    console.log(`📋 Instruction Manager running at http://localhost:${PORT}`);
+app.listen(PORT, async () => {
+    try {
+        await ensureDbReady();
+        console.log(`📋 Instruction Manager running at http://localhost:${PORT}`);
+    } catch (err) {
+        console.error("Instruction Manager startup error:", err);
+    }
 });

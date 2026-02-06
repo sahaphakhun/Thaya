@@ -19,9 +19,9 @@ PAGE_ACCESS_TOKEN_3=your_page3_token
 # ... เพิ่มตามจำนวนเพจ
 OPENAI_API_KEY=your_openai_api_key
 VERIFY_TOKEN=AiDee_a4wfaw4
-MONGO_URI=your_mongodb_connection_string
+DATABASE_URL=your_postgresql_connection_string
 
-# Optional (แผนลดพื้นที่ MongoDB แบบ aggressive)
+# Optional (แผนลดพื้นที่ DB แบบ aggressive)
 CHAT_HISTORY_MAX_MESSAGES=50
 CHAT_HISTORY_SUMMARY_MIN_BATCH=10
 CHAT_HISTORY_SUMMARY_SOURCE_MAX_CHARS=6000
@@ -31,6 +31,12 @@ ENABLE_ORDER_CHAT_HISTORY=false
 MONGO_CONNECT_RETRY_COUNT=2
 MONGO_OPERATION_RETRY_COUNT=1
 MONGO_RETRY_DELAY_MS=500
+
+# Logging (ลด log ปริมาณสูงจาก webhook)
+LOG_LEVEL=info
+LOG_SUPPRESS_LEGACY_DEBUG=true
+WEBHOOK_SUMMARY_INTERVAL_MS=60000
+ORDER_SKIP_LOG_SAMPLE_RATE=0.1
 ```
 
 ### 3. ตั้งค่า Webhook URL
@@ -46,7 +52,7 @@ https://your-railway-app.railway.app/webhook
 - 📊 ระบบบันทึกออเดอร์อัตโนมัติ
 - 🔄 ระบบติดตามลูกค้าอัตโนมัติ
 - 📈 เชื่อมต่อ Google Sheets และ Google Docs
-- 💾 เก็บข้อมูลใน MongoDB
+- 💾 เก็บข้อมูลใน PostgreSQL
 
 ## การใช้งาน
 
