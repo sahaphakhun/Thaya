@@ -65,8 +65,8 @@ IMPORT_INSTRUCTION_SOURCE=code
 - `google` = import จาก Google Doc + Google Sheets โดยตรง
 
 `IMPORT_INSTRUCTION_ALLOW_FAILURE`:
-- `true` = ถ้า import พลาด จะ log เตือนแล้วให้แอปเริ่มต่อ
-- `false` = ถ้า import พลาด จะหยุด start (ค่าเริ่มต้น)
+- `true` = ถ้า import พลาด จะ log เตือนแล้วให้แอปเริ่มต่อ (ค่าเริ่มต้น)
+- `false` = ถ้า import พลาด จะหยุด start
 
 ### 3. ตั้งค่า Webhook URL
 ตั้งค่า Facebook Webhook URL เป็น:

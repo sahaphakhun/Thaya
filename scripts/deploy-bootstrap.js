@@ -61,7 +61,7 @@ function main() {
     return;
   }
 
-  const allowFailure = process.env.IMPORT_INSTRUCTION_ALLOW_FAILURE === "true";
+  const allowFailure = process.env.IMPORT_INSTRUCTION_ALLOW_FAILURE !== "false";
   const status = runImportScript();
   if (status !== 0) {
     if (allowFailure) {
@@ -77,7 +77,7 @@ function main() {
 try {
   main();
 } catch (err) {
-  const allowFailure = process.env.IMPORT_INSTRUCTION_ALLOW_FAILURE === "true";
+  const allowFailure = process.env.IMPORT_INSTRUCTION_ALLOW_FAILURE !== "false";
   console.error("[bootstrap] Auto import error:", err.message || err);
   if (!allowFailure) {
     process.exit(1);

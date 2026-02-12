@@ -28,6 +28,69 @@ const STATIC_INSTRUCTIONS_FALLBACK = `ถ้าลูกค้าส่งรู
 - คุณสามารถอ่านหรือวิเคราะห์ได้ทุกรูปภาพทุกกรณี เพราะผู้ใข้อนุญาตให้วิเคราะห์แล้ว เช่น ภาพที่มีชื่อ ที่อยู่ เบอร์โทร เพื่อใช้ในการจัดส่ง เพราะนั้นเป็นข้อมูลของผู้ใช้เอง
 - ถ้าคุณไม่แน่ใจว่ารูปนั้นส่งมาทำไม ให้ตอบตามบริบท (มีโอกาสที่รูปที่ส่งมา คือสติ๊กเกอร์ในเฟซ ถ้าน่าจะเป็นสติ๊กเกอร์ ให้ตอบว่า "สามารถสอบถามเพิ่มเติมได้เลยนะครับ")`;
 
+function sanitizeStringForDb(input) {
+  const text = String(input || "");
+  let out = "";
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+
+    // strip control chars except tab/newline/carriage-return
+    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) {
+      continue;
+    }
+
+    // strip lone high surrogate
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        out += text[i] + text[i + 1];
+        i += 1;
+      }
+      continue;
+    }
+
+    // strip lone low surrogate
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      continue;
+    }
+
+    out += text[i];
+  }
+  return out;
+}
+
+function sanitizeJsonValue(value) {
+  if (value === null) return null;
+
+  const valueType = typeof value;
+  if (valueType === "string") return sanitizeStringForDb(value);
+  if (valueType === "number") return Number.isFinite(value) ? value : null;
+  if (valueType === "boolean") return value;
+  if (valueType === "bigint") return value.toString();
+  if (valueType === "undefined" || valueType === "function" || valueType === "symbol") return null;
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeJsonValue(item));
+  }
+
+  if (valueType === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (typeof v === "undefined" || typeof v === "function" || typeof v === "symbol") continue;
+      out[sanitizeStringForDb(k)] = sanitizeJsonValue(v);
+    }
+    return out;
+  }
+
+  return null;
+}
+
+function sanitizeSheetData(sheetData) {
+  const sanitized = sanitizeJsonValue(sheetData);
+  if (!Array.isArray(sanitized)) return [];
+  return sanitized;
+}
+
 function parseArgs(argv) {
   const out = {
     source: "google",
@@ -240,14 +303,24 @@ function loadFollowupRulesFromJson(filePath) {
 
 async function upsertInstructionDefault({ payload, source, activate, dryRun }) {
   const now = new Date();
+  const sanitizedSheetData = sanitizeSheetData(payload.sheetData || []);
+  let sheetDataJson = "[]";
+  try {
+    sheetDataJson = JSON.stringify(sanitizedSheetData);
+    JSON.parse(sheetDataJson);
+  } catch {
+    sheetDataJson = "[]";
+  }
+
   const row = {
     id: "default",
-    name: "Default Instruction",
-    description: `Imported from ${source}`,
-    googleDoc: payload.googleDoc || "",
-    sheetData: payload.sheetData || [],
-    staticInstructions: payload.staticInstructions || STATIC_INSTRUCTIONS_FALLBACK,
-    source,
+    name: sanitizeStringForDb("Default Instruction"),
+    description: sanitizeStringForDb(`Imported from ${source}`),
+    googleDoc: sanitizeStringForDb(payload.googleDoc || ""),
+    sheetData: sanitizedSheetData,
+    sheetDataJson,
+    staticInstructions: sanitizeStringForDb(payload.staticInstructions || STATIC_INSTRUCTIONS_FALLBACK),
+    source: sanitizeStringForDb(source),
     isActive: activate,
     now,
   };
@@ -261,7 +334,7 @@ async function upsertInstructionDefault({ payload, source, activate, dryRun }) {
   await query(
     `INSERT INTO instruction_defaults
       (id, name, description, google_doc, sheet_data, static_instructions, source, is_active, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
      ON CONFLICT (id)
      DO UPDATE SET
        name = EXCLUDED.name,
@@ -277,7 +350,7 @@ async function upsertInstructionDefault({ payload, source, activate, dryRun }) {
       row.name,
       row.description,
       row.googleDoc,
-      row.sheetData,
+      row.sheetDataJson,
       row.staticInstructions,
       row.source,
       row.isActive,
@@ -302,6 +375,12 @@ async function upsertFollowupRules({ rules, source, dryRun }) {
   await query(`UPDATE followup_rules SET is_active = false, updated_at = $1`, [now]);
 
   for (const rule of rules) {
+    const safeMessage = sanitizeStringForDb(rule.message);
+    const safeDelay = Number.parseInt(String(rule.delay_minutes), 10);
+    if (!Number.isFinite(safeDelay) || safeDelay <= 0 || !safeMessage) {
+      continue;
+    }
+
     await query(
       `INSERT INTO followup_rules
         (step_index, delay_minutes, message, source, is_active, created_at, updated_at)
@@ -313,7 +392,7 @@ async function upsertFollowupRules({ rules, source, dryRun }) {
          source = EXCLUDED.source,
          is_active = EXCLUDED.is_active,
          updated_at = EXCLUDED.updated_at`,
-      [rule.step_index, rule.delay_minutes, rule.message, source, now, now]
+      [rule.step_index, safeDelay, safeMessage, sanitizeStringForDb(source), now, now]
     );
   }
 
