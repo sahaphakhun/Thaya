@@ -3,6 +3,8 @@ const state = {
   versions: [],
   followups: [],
   images: [],
+  followupsDirty: false,
+  pendingOps: new Set(),
   sheetEditors: {
     default: createSheetEditorState(),
     version: createSheetEditorState(),
@@ -27,6 +29,8 @@ const state = {
   },
   isHydrating: false,
 };
+
+const MAX_IMAGE_FILE_BYTES = 7 * 1024 * 1024;
 
 const views = {
   dashboard: {
@@ -186,6 +190,60 @@ async function fetchJSON(url, options = {}) {
     throw new Error(msg);
   }
   return data;
+}
+
+function getErrorMessage(err) {
+  if (err && typeof err.message === "string" && err.message.trim()) {
+    return err.message;
+  }
+  return "เกิดข้อผิดพลาด";
+}
+
+function normalizeControlIds(controlIds) {
+  if (!controlIds) return [];
+  return Array.isArray(controlIds) ? controlIds : [controlIds];
+}
+
+function setControlsDisabled(controlIds, disabled) {
+  normalizeControlIds(controlIds).forEach((id) => {
+    const el = qs(id);
+    if (el) {
+      el.disabled = disabled;
+    }
+  });
+}
+
+async function runGuardedOperation(operationKey, controlIds, task) {
+  if (state.pendingOps.has(operationKey)) {
+    return null;
+  }
+
+  state.pendingOps.add(operationKey);
+  setControlsDisabled(controlIds, true);
+  try {
+    return await task();
+  } finally {
+    state.pendingOps.delete(operationKey);
+    setControlsDisabled(controlIds, false);
+  }
+}
+
+function runOperation(operationKey, controlIds, task) {
+  runGuardedOperation(operationKey, controlIds, task).catch((err) => {
+    showToast(getErrorMessage(err), "err");
+  });
+}
+
+async function runButtonAction(button, task) {
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  try {
+    await task();
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+    }
+  }
 }
 
 function switchView(viewId) {
@@ -415,6 +473,10 @@ function touchScope(scope) {
   scheduleDraftSave(scope);
 }
 
+function markFollowupsDirty(dirty) {
+  state.followupsDirty = Boolean(dirty);
+}
+
 function updateDirtyChip(scope) {
   const config = formScopeConfigs[scope];
   const chip = qs(config.dirtyChip);
@@ -563,10 +625,15 @@ function clearDraft(scope) {
 }
 
 function hasDirtyForms() {
-  return state.drafts.default.dirty || state.drafts.version.dirty;
+  return state.drafts.default.dirty || state.drafts.version.dirty || state.followupsDirty;
 }
 
 function confirmDiscard(scope, actionLabel) {
+  if (scope === "followups") {
+    if (!state.followupsDirty) return true;
+    return window.confirm(`มีข้อมูล Follow-up ที่ยังไม่บันทึก ต้องการ${actionLabel}หรือไม่?`);
+  }
+
   if (!state.drafts[scope].dirty) return true;
   return window.confirm(`มีข้อมูล ${scope === "default" ? "Default" : "Version"} ที่ยังไม่บันทึก ต้องการ${actionLabel}หรือไม่?`);
 }
@@ -1113,7 +1180,7 @@ function getVersionById(id) {
   return state.versions.find((v) => v.id === id) || null;
 }
 
-function renderVersions() {
+function renderVersions(preferredBuildSource = null) {
   const search = qs("versionsSearch").value.trim().toLowerCase();
   const list = state.versions.filter((v) => {
     if (!search) return true;
@@ -1148,11 +1215,15 @@ function renderVersions() {
     rows || `<tr><td colspan="4">ไม่พบข้อมูลเวอร์ชัน</td></tr>`;
 
   const buildSource = qs("buildSource");
+  const currentSource = preferredBuildSource ?? buildSource.value ?? "default";
   const options = [
     `<option value="default">Default (DB)</option>`,
     ...state.versions.map((v) => `<option value="${v.id}">${escapeHtml(v.name)}</option>`),
   ];
   buildSource.innerHTML = options.join("");
+
+  const selectableValues = new Set(["default", ...state.versions.map((v) => String(v.id))]);
+  buildSource.value = selectableValues.has(String(currentSource)) ? String(currentSource) : "default";
 }
 
 function resetVersionForm() {
@@ -1182,28 +1253,44 @@ function fillVersionForm(version) {
 }
 
 function renderFollowups() {
-  const rows = state.followups
-    .sort((a, b) => a.stepIndex - b.stepIndex)
+  const rows = [...state.followups]
+    .sort((a, b) => Number(a.stepIndex || 0) - Number(b.stepIndex || 0))
     .map((r) => {
+      const rowId = escapeHtml(r.id || `row-${r.stepIndex || 0}-${Date.now()}`);
+      const stepValue = escapeHtml(r.stepIndex ?? "");
+      const delayValue = escapeHtml(r.delayMinutes ?? "");
+      const messageValue = escapeHtml(r.message ?? "");
       return `
-        <tr>
-          <td><input type="number" data-role="step" value="${r.stepIndex}"></td>
-          <td><input type="number" data-role="delay" value="${r.delayMinutes}"></td>
-          <td><textarea data-role="message" rows="2">${escapeHtml(r.message)}</textarea></td>
+        <tr data-id="${rowId}">
+          <td><input type="number" data-role="step" value="${stepValue}"></td>
+          <td><input type="number" data-role="delay" value="${delayValue}"></td>
+          <td><textarea data-role="message" rows="2">${messageValue}</textarea></td>
           <td><input type="checkbox" data-role="active" ${r.isActive ? "checked" : ""}></td>
           <td><button data-role="remove" type="button">ลบ</button></td>
         </tr>
       `;
     })
     .join("");
-  qs("followupTableBody").innerHTML = rows || "";
+  qs("followupTableBody").innerHTML =
+    rows || `<tr><td colspan="5">ยังไม่มี follow-up rule กด "เพิ่มแถว" เพื่อเริ่มต้น</td></tr>`;
+}
+
+function syncFollowupsStateFromDom() {
+  state.followups = collectFollowupRowsFromDom();
+}
+
+function getNextFollowupStep(rows) {
+  const numericSteps = rows
+    .map((row) => Number.parseInt(String(row.stepIndex ?? "").trim(), 10))
+    .filter((value) => Number.isFinite(value));
+  if (numericSteps.length === 0) return 0;
+  return Math.max(...numericSteps) + 1;
 }
 
 function addFollowupRow() {
-  const nextStep =
-    state.followups.length === 0
-      ? 0
-      : Math.max(...state.followups.map((r) => Number(r.stepIndex || 0))) + 1;
+  syncFollowupsStateFromDom();
+  const nextStep = getNextFollowupStep(state.followups);
+
   state.followups.push({
     id: `new-${Date.now()}`,
     stepIndex: nextStep,
@@ -1212,16 +1299,66 @@ function addFollowupRow() {
     isActive: true,
   });
   renderFollowups();
+  markFollowupsDirty(true);
 }
 
 function collectFollowupRowsFromDom() {
   const rows = [...qs("followupTableBody").querySelectorAll("tr")];
-  return rows.map((row) => ({
-    stepIndex: Number.parseInt(row.querySelector('[data-role="step"]').value, 10),
-    delayMinutes: Number.parseInt(row.querySelector('[data-role="delay"]').value, 10),
-    message: row.querySelector('[data-role="message"]').value.trim(),
-    isActive: row.querySelector('[data-role="active"]').checked,
-  }));
+  return rows
+    .map((row, index) => {
+      const stepEl = row.querySelector('[data-role="step"]');
+      const delayEl = row.querySelector('[data-role="delay"]');
+      const messageEl = row.querySelector('[data-role="message"]');
+      const activeEl = row.querySelector('[data-role="active"]');
+      if (!stepEl || !delayEl || !messageEl || !activeEl) {
+        return null;
+      }
+
+      return {
+        id: row.dataset.id || `draft-${index}`,
+        stepIndex: String(stepEl.value ?? "").trim(),
+        delayMinutes: String(delayEl.value ?? "").trim(),
+        message: String(messageEl.value ?? "").trim(),
+        isActive: Boolean(activeEl.checked),
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeFollowupRows(rows) {
+  const normalized = [];
+  const stepSet = new Set();
+
+  rows.forEach((row, index) => {
+    const rowNumber = index + 1;
+    const stepIndex = Number.parseInt(String(row.stepIndex || "").trim(), 10);
+    const delayMinutes = Number.parseInt(String(row.delayMinutes || "").trim(), 10);
+    const message = String(row.message || "").trim();
+
+    if (!Number.isFinite(stepIndex) || stepIndex < 0) {
+      throw new Error(`Step แถวที่ ${rowNumber} ต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป`);
+    }
+    if (!Number.isFinite(delayMinutes) || delayMinutes <= 0) {
+      throw new Error(`Delay แถวที่ ${rowNumber} ต้องมากกว่า 0 นาที`);
+    }
+    if (!message) {
+      throw new Error(`Message แถวที่ ${rowNumber} ห้ามว่าง`);
+    }
+    if (stepSet.has(stepIndex)) {
+      throw new Error(`Step ซ้ำกันที่ค่า ${stepIndex}`);
+    }
+
+    stepSet.add(stepIndex);
+    normalized.push({
+      stepIndex,
+      delayMinutes,
+      message,
+      isActive: Boolean(row.isActive),
+    });
+  });
+
+  normalized.sort((a, b) => a.stepIndex - b.stepIndex);
+  return normalized;
 }
 
 function renderImages() {
@@ -1246,28 +1383,79 @@ function renderImages() {
   qs("imageGrid").innerHTML = html || `<p>ยังไม่มีรูปภาพ</p>`;
 }
 
-async function refreshAll() {
+async function refreshAll(options = {}) {
+  const {
+    forceDefault = false,
+    forceVersion = false,
+    forceFollowups = false,
+    preserveBuildSource = true,
+  } = options;
+
   if (state.cellEditor.open) {
     closeCellEditor();
   }
 
-  const [defaultData, versions, followups, images] = await Promise.all([
+  const preferredBuildSource = preserveBuildSource ? qs("buildSource").value || "default" : "default";
+  const [defaultRes, versionsRes, followupsRes, imagesRes] = await Promise.allSettled([
     fetchJSON("/api/default"),
     fetchJSON("/api/versions"),
-    fetchJSON("/api/followups").catch(() => []),
-    fetchJSON("/api/images").catch(() => []),
+    fetchJSON("/api/followups"),
+    fetchJSON("/api/images"),
   ]);
 
-  state.defaultData = defaultData;
-  state.versions = Array.isArray(versions) ? versions : [];
-  state.followups = Array.isArray(followups) ? followups : [];
-  state.images = Array.isArray(images) ? images : [];
+  if (defaultRes.status !== "fulfilled") {
+    throw defaultRes.reason;
+  }
+  if (versionsRes.status !== "fulfilled") {
+    throw versionsRes.reason;
+  }
 
-  loadDefaultToForm();
-  renderVersions();
-  renderFollowups();
-  renderImages();
+  state.defaultData = defaultRes.value;
+  state.versions = Array.isArray(versionsRes.value) ? versionsRes.value : [];
+
+  if (followupsRes.status === "fulfilled") {
+    const serverFollowups = Array.isArray(followupsRes.value) ? followupsRes.value : [];
+    if (forceFollowups || !state.followupsDirty) {
+      state.followups = serverFollowups;
+      renderFollowups();
+      markFollowupsDirty(false);
+    }
+  } else {
+    showToast(`โหลด Follow-up ไม่สำเร็จ: ${getErrorMessage(followupsRes.reason)}`, "err");
+  }
+
+  if (imagesRes.status === "fulfilled") {
+    state.images = Array.isArray(imagesRes.value) ? imagesRes.value : [];
+    renderImages();
+  } else {
+    showToast(`โหลดรูปภาพไม่สำเร็จ: ${getErrorMessage(imagesRes.reason)}`, "err");
+  }
+
+  if (forceDefault || !state.drafts.default.dirty) {
+    loadDefaultToForm();
+  }
+
+  if (forceVersion || !state.drafts.version.dirty) {
+    const editingVersionId = qs("versionId").value.trim();
+    if (editingVersionId) {
+      const latest = getVersionById(editingVersionId);
+      if (latest) {
+        fillVersionForm(latest);
+      } else {
+        resetVersionForm();
+      }
+    }
+  }
+
+  renderVersions(preferredBuildSource);
   updateDashboard();
+}
+
+async function reloadDefaultFromServer() {
+  state.defaultData = await fetchJSON("/api/default");
+  loadDefaultToForm();
+  updateDashboard();
+  showToast("โหลดข้อมูล Default ล่าสุดแล้ว", "ok");
 }
 
 async function saveDefault() {
@@ -1289,7 +1477,7 @@ async function saveDefault() {
     isActive: true,
   };
 
-  await fetchJSON("/api/default", {
+  state.defaultData = await fetchJSON("/api/default", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -1297,7 +1485,7 @@ async function saveDefault() {
 
   clearDraft("default");
   showToast("บันทึก Default สำเร็จ", "ok");
-  await refreshAll();
+  await refreshAll({ forceDefault: true });
 }
 
 async function saveVersion() {
@@ -1341,34 +1529,66 @@ async function saveVersion() {
 
   clearDraft("version");
   showToast("บันทึกเวอร์ชันสำเร็จ", "ok");
-  await refreshAll();
+  await refreshAll({ forceVersion: true });
 }
 
 async function importVersion() {
   const input = document.createElement("input");
   input.type = "file";
   input.accept = ".json";
-  input.onchange = async (event) => {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-    const text = await file.text();
-    await fetchJSON("/api/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: text,
-    });
-    showToast("Import version สำเร็จ", "ok");
-    await refreshAll();
+
+  const file = await new Promise((resolve) => {
+    input.onchange = (event) => {
+      resolve((event.target.files && event.target.files[0]) || null);
+    };
+    input.click();
+  });
+
+  if (!file) return;
+
+  const text = await file.text();
+  await fetchJSON("/api/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: text,
+  });
+  showToast("Import version สำเร็จ", "ok");
+  await refreshAll({ forceVersion: true });
+}
+
+function getBuildPayloadFromSource(source) {
+  if (source === "default") {
+    return {
+      googleDoc: qs("defaultGoogleDoc").value,
+      sheetData: collectSheetDataForSave("default"),
+      staticInstructions: qs("defaultStatic").value,
+    };
+  }
+
+  const editingVersionId = qs("versionId").value.trim();
+  if (editingVersionId && editingVersionId === source) {
+    return {
+      googleDoc: qs("versionGoogleDoc").value,
+      sheetData: collectSheetDataForSave("version"),
+      staticInstructions: qs("versionStatic").value,
+    };
+  }
+
+  const version = getVersionById(source);
+  if (!version) return null;
+
+  return {
+    googleDoc: version.googleDoc || "",
+    sheetData: Array.isArray(version.sheetData) ? version.sheetData : [],
+    staticInstructions: version.staticInstructions || "",
   };
-  input.click();
 }
 
 async function buildPreview() {
   const source = qs("buildSource").value;
   const format = qs("buildFormat").value;
-  const version = source === "default" ? state.defaultData : getVersionById(source);
-
-  if (!version) {
+  const payload = getBuildPayloadFromSource(source);
+  if (!payload) {
     showToast("ไม่พบ source ที่เลือก", "err");
     return;
   }
@@ -1377,9 +1597,9 @@ async function buildPreview() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      googleDoc: version.googleDoc || "",
-      sheetData: version.sheetData || [],
-      staticInstructions: version.staticInstructions || "",
+      googleDoc: payload.googleDoc || "",
+      sheetData: payload.sheetData || [],
+      staticInstructions: payload.staticInstructions || "",
       format,
     }),
   });
@@ -1390,11 +1610,7 @@ async function buildPreview() {
 }
 
 async function saveFollowups() {
-  const rows = collectFollowupRowsFromDom();
-  if (rows.length === 0) {
-    showToast("ไม่มี follow-up rule ให้บันทึก", "err");
-    return;
-  }
+  const rows = normalizeFollowupRows(collectFollowupRowsFromDom());
 
   await fetchJSON("/api/followups", {
     method: "PUT",
@@ -1403,7 +1619,7 @@ async function saveFollowups() {
   });
 
   showToast("บันทึก Follow-up สำเร็จ", "ok");
-  await refreshAll();
+  await refreshAll({ forceFollowups: true });
 }
 
 async function uploadImage() {
@@ -1411,6 +1627,10 @@ async function uploadImage() {
   const file = fileInput.files && fileInput.files[0];
   if (!file) {
     showToast("กรุณาเลือกไฟล์รูป", "err");
+    return;
+  }
+  if (file.size > MAX_IMAGE_FILE_BYTES) {
+    showToast("ไฟล์รูปใหญ่เกินไป (รองรับสูงสุดประมาณ 7MB)", "err");
     return;
   }
 
@@ -1539,11 +1759,11 @@ function bindGlobalShortcuts() {
     event.preventDefault();
 
     if (activeView === "default") {
-      saveDefault().catch((err) => showToast(err.message, "err"));
+      runOperation("saveDefault", "saveDefaultBtn", saveDefault);
       return;
     }
 
-    saveVersion().catch((err) => showToast(err.message, "err"));
+    runOperation("saveVersion", "saveVersionBtn", saveVersion);
   });
 
   window.addEventListener("beforeunload", (event) => {
@@ -1589,24 +1809,32 @@ function bindEvents() {
   bindCellEditorEvents();
   bindGlobalShortcuts();
 
-  qs("refreshAllBtn").addEventListener("click", async () => {
-    if (!confirmDiscard("default", "รีเฟรชข้อมูล") || !confirmDiscard("version", "รีเฟรชข้อมูล")) {
-      return;
-    }
-    await refreshAll();
-    showToast("รีเฟรชข้อมูลแล้ว", "ok");
-  });
-
-  qs("saveDefaultBtn").addEventListener("click", () =>
-    saveDefault().catch((err) => showToast(err.message, "err"))
+  qs("refreshAllBtn").addEventListener("click", () =>
+    runOperation("refreshAll", "refreshAllBtn", async () => {
+      if (!confirmDiscard("default", "รีเฟรชข้อมูล")) return;
+      if (!confirmDiscard("version", "รีเฟรชข้อมูล")) return;
+      if (!confirmDiscard("followups", "รีเฟรชข้อมูล")) return;
+      await refreshAll({
+        forceDefault: true,
+        forceVersion: true,
+        forceFollowups: true,
+      });
+      showToast("รีเฟรชข้อมูลแล้ว", "ok");
+    })
   );
 
-  qs("reloadDefaultBtn").addEventListener("click", () => {
-    if (!confirmDiscard("default", "โหลดข้อมูลใหม่")) return;
-    loadDefaultToForm();
-  });
+  qs("saveDefaultBtn").addEventListener("click", () =>
+    runOperation("saveDefault", "saveDefaultBtn", saveDefault)
+  );
 
-  qs("versionsSearch").addEventListener("input", renderVersions);
+  qs("reloadDefaultBtn").addEventListener("click", () =>
+    runOperation("reloadDefault", "reloadDefaultBtn", async () => {
+      if (!confirmDiscard("default", "โหลดข้อมูลใหม่")) return;
+      await reloadDefaultFromServer();
+    })
+  );
+
+  qs("versionsSearch").addEventListener("input", () => renderVersions());
 
   qs("newVersionBtn").addEventListener("click", () => {
     if (!confirmDiscard("version", "ล้างฟอร์มเวอร์ชัน")) return;
@@ -1619,100 +1847,119 @@ function bindEvents() {
   });
 
   qs("saveVersionBtn").addEventListener("click", () =>
-    saveVersion().catch((err) => showToast(err.message, "err"))
+    runOperation("saveVersion", "saveVersionBtn", saveVersion)
   );
 
   qs("importVersionBtn").addEventListener("click", () =>
-    importVersion().catch((err) => showToast(err.message, "err"))
+    runOperation("importVersion", "importVersionBtn", importVersion)
   );
 
-  qs("versionsTableBody").addEventListener("click", async (event) => {
+  qs("versionsTableBody").addEventListener("click", (event) => {
     const target = event.target.closest("button");
     if (!target) return;
     const id = target.dataset.id;
     const act = target.dataset.act;
     if (!id || !act) return;
 
-    if (act === "edit") {
-      if (!confirmDiscard("version", "เปิดเวอร์ชันอื่น")) return;
-      const version = getVersionById(id);
-      if (version) {
-        fillVersionForm(version);
+    runButtonAction(target, async () => {
+      if (act === "edit") {
+        if (!confirmDiscard("version", "เปิดเวอร์ชันอื่น")) return;
+        const version = getVersionById(id);
+        if (version) {
+          fillVersionForm(version);
+        }
+        return;
       }
-      return;
-    }
 
-    if (act === "duplicate") {
-      const v = getVersionById(id);
-      if (!v) return;
-      await fetchJSON("/api/versions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: `${v.name} (สำเนา)`,
-          description: v.description || "",
-          googleDoc: v.googleDoc || "",
-          sheetData: v.sheetData || [],
-          staticInstructions: v.staticInstructions || "",
-        }),
-      });
-      await refreshAll();
-      showToast("ทำสำเนาเวอร์ชันแล้ว", "ok");
-      return;
-    }
+      if (act === "duplicate") {
+        const v = getVersionById(id);
+        if (!v) return;
+        await fetchJSON("/api/versions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: `${v.name} (สำเนา)`,
+            description: v.description || "",
+            googleDoc: v.googleDoc || "",
+            sheetData: v.sheetData || [],
+            staticInstructions: v.staticInstructions || "",
+          }),
+        });
+        await refreshAll();
+        showToast("ทำสำเนาเวอร์ชันแล้ว", "ok");
+        return;
+      }
 
-    if (act === "activate") {
-      await fetchJSON(`/api/versions/${encodeURIComponent(id)}/activate`, {
-        method: "POST",
-      });
-      await refreshAll();
-      showToast("เปิดใช้งานเวอร์ชันแล้ว", "ok");
-      return;
-    }
+      if (act === "activate") {
+        await fetchJSON(`/api/versions/${encodeURIComponent(id)}/activate`, {
+          method: "POST",
+        });
+        await refreshAll();
+        showToast("เปิดใช้งานเวอร์ชันแล้ว", "ok");
+        return;
+      }
 
-    if (act === "delete") {
-      const confirmDelete = window.confirm("ต้องการลบเวอร์ชันนี้หรือไม่?");
-      if (!confirmDelete) return;
-      await fetchJSON(`/api/versions/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
-      await refreshAll();
-      showToast("ลบเวอร์ชันแล้ว", "ok");
-      return;
-    }
+      if (act === "delete") {
+        const confirmDelete = window.confirm("ต้องการลบเวอร์ชันนี้หรือไม่?");
+        if (!confirmDelete) return;
+        await fetchJSON(`/api/versions/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+        await refreshAll();
+        showToast("ลบเวอร์ชันแล้ว", "ok");
+        return;
+      }
 
-    if (act === "export") {
-      window.open(`/api/versions/${encodeURIComponent(id)}/export`, "_blank");
-    }
+      if (act === "export") {
+        window.open(`/api/versions/${encodeURIComponent(id)}/export`, "_blank");
+      }
+    }).catch((err) => showToast(getErrorMessage(err), "err"));
   });
 
   qs("buildBtn").addEventListener("click", () =>
-    buildPreview().catch((err) => showToast(err.message, "err"))
+    runOperation("buildPreview", "buildBtn", buildPreview)
   );
 
   qs("addFollowupBtn").addEventListener("click", addFollowupRow);
   qs("saveFollowupsBtn").addEventListener("click", () =>
-    saveFollowups().catch((err) => showToast(err.message, "err"))
+    runOperation("saveFollowups", "saveFollowupsBtn", saveFollowups)
   );
+
+  qs("followupTableBody").addEventListener("input", (event) => {
+    if (!event.target.closest("[data-role]")) return;
+    syncFollowupsStateFromDom();
+    markFollowupsDirty(true);
+  });
+
+  qs("followupTableBody").addEventListener("change", (event) => {
+    if (!event.target.closest("[data-role]")) return;
+    syncFollowupsStateFromDom();
+    markFollowupsDirty(true);
+  });
 
   qs("followupTableBody").addEventListener("click", (event) => {
     const target = event.target.closest("button");
     if (!target || target.dataset.role !== "remove") return;
     target.closest("tr")?.remove();
+    syncFollowupsStateFromDom();
+    renderFollowups();
+    markFollowupsDirty(true);
   });
 
   qs("uploadImageBtn").addEventListener("click", () =>
-    uploadImage().catch((err) => showToast(err.message, "err"))
+    runOperation("uploadImage", "uploadImageBtn", uploadImage)
   );
 
-  qs("reloadImagesBtn").addEventListener("click", async () => {
-    state.images = await fetchJSON("/api/images");
-    renderImages();
-    updateDashboard();
-    showToast("โหลดรูปใหม่แล้ว", "ok");
-  });
+  qs("reloadImagesBtn").addEventListener("click", () =>
+    runOperation("reloadImages", "reloadImagesBtn", async () => {
+      state.images = await fetchJSON("/api/images");
+      renderImages();
+      updateDashboard();
+      showToast("โหลดรูปใหม่แล้ว", "ok");
+    })
+  );
 
-  qs("imageGrid").addEventListener("click", async (event) => {
+  qs("imageGrid").addEventListener("click", (event) => {
     const target = event.target.closest("button");
     if (!target) return;
 
@@ -1720,21 +1967,23 @@ function bindEvents() {
     const act = target.dataset.imgAct;
     if (!key || !act) return;
 
-    if (act === "copy") {
-      await navigator.clipboard.writeText(`[IMG:${key}]`);
-      showToast("คัดลอก token แล้ว", "ok");
-      return;
-    }
+    runButtonAction(target, async () => {
+      if (act === "copy") {
+        await navigator.clipboard.writeText(`[IMG:${key}]`);
+        showToast("คัดลอก token แล้ว", "ok");
+        return;
+      }
 
-    if (act === "delete") {
-      const confirmDelete = window.confirm(`ต้องการลบรูป ${key} หรือไม่?`);
-      if (!confirmDelete) return;
-      await fetchJSON(`/api/images/${encodeURIComponent(key)}`, { method: "DELETE" });
-      state.images = await fetchJSON("/api/images");
-      renderImages();
-      updateDashboard();
-      showToast("ลบรูปแล้ว", "ok");
-    }
+      if (act === "delete") {
+        const confirmDelete = window.confirm(`ต้องการลบรูป ${key} หรือไม่?`);
+        if (!confirmDelete) return;
+        await fetchJSON(`/api/images/${encodeURIComponent(key)}`, { method: "DELETE" });
+        state.images = await fetchJSON("/api/images");
+        renderImages();
+        updateDashboard();
+        showToast("ลบรูปแล้ว", "ok");
+      }
+    }).catch((err) => showToast(getErrorMessage(err), "err"));
   });
 }
 
