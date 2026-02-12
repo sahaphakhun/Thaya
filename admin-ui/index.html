@@ -139,6 +139,29 @@
 
                 <div class="sheet-mode-panel active" id="defaultSheetTablePanel">
                   <p class="sheet-empty" id="defaultSheetEmpty">ยังไม่มีคอลัมน์ เริ่มด้วยการเพิ่มคอลัมน์ก่อนสร้างแถวข้อมูล</p>
+                  <div class="sheet-grid-tools">
+                    <label class="sheet-filter-field">
+                      <span>ค้นหาในตาราง</span>
+                      <input id="defaultSheetFilterInput" type="search" placeholder="ค้นหาได้ทุกคอลัมน์...">
+                    </label>
+                    <div class="sheet-pager">
+                      <label>
+                        <span>แถวต่อหน้า</span>
+                        <select id="defaultSheetPageSize">
+                          <option value="25">25</option>
+                          <option value="50">50</option>
+                          <option value="100">100</option>
+                          <option value="250">250</option>
+                        </select>
+                      </label>
+                      <span class="sheet-pager-meta" id="defaultSheetPaginationInfo">0 รายการ</span>
+                      <div class="row-inline">
+                        <button class="btn ghost small" id="defaultSheetPrevPage" type="button">ก่อนหน้า</button>
+                        <span class="sheet-page-label" id="defaultSheetPageLabel">หน้า 1 / 1</span>
+                        <button class="btn ghost small" id="defaultSheetNextPage" type="button">ถัดไป</button>
+                      </div>
+                    </div>
+                  </div>
                   <div class="table-wrap">
                     <table class="sheet-table">
                       <thead id="defaultSheetHead"></thead>
@@ -255,6 +278,29 @@
 
                 <div class="sheet-mode-panel active" id="versionSheetTablePanel">
                   <p class="sheet-empty" id="versionSheetEmpty">ยังไม่มีคอลัมน์ เริ่มด้วยการเพิ่มคอลัมน์ก่อนสร้างแถวข้อมูล</p>
+                  <div class="sheet-grid-tools">
+                    <label class="sheet-filter-field">
+                      <span>ค้นหาในตาราง</span>
+                      <input id="versionSheetFilterInput" type="search" placeholder="ค้นหาได้ทุกคอลัมน์...">
+                    </label>
+                    <div class="sheet-pager">
+                      <label>
+                        <span>แถวต่อหน้า</span>
+                        <select id="versionSheetPageSize">
+                          <option value="25">25</option>
+                          <option value="50">50</option>
+                          <option value="100">100</option>
+                          <option value="250">250</option>
+                        </select>
+                      </label>
+                      <span class="sheet-pager-meta" id="versionSheetPaginationInfo">0 รายการ</span>
+                      <div class="row-inline">
+                        <button class="btn ghost small" id="versionSheetPrevPage" type="button">ก่อนหน้า</button>
+                        <span class="sheet-page-label" id="versionSheetPageLabel">หน้า 1 / 1</span>
+                        <button class="btn ghost small" id="versionSheetNextPage" type="button">ถัดไป</button>
+                      </div>
+                    </div>
+                  </div>
                   <div class="table-wrap">
                     <table class="sheet-table">
                       <thead id="versionSheetHead"></thead>
@@ -364,6 +410,21 @@
         <div class="image-grid" id="imageGrid"></div>
       </section>
     </main>
+  </div>
+
+  <div class="modal-backdrop" id="cellEditorModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="cellEditorTitle">แก้ไขข้อมูล</h3>
+        <button class="btn ghost small" id="cellEditorCloseBtn" type="button">ปิด</button>
+      </div>
+      <p class="modal-note" id="cellEditorMeta">รองรับหลายบรรทัด</p>
+      <textarea id="cellEditorTextarea" class="mono" rows="14" placeholder="พิมพ์ข้อความ..."></textarea>
+      <div class="modal-actions">
+        <button class="btn ghost" id="cellEditorCancelBtn" type="button">ยกเลิก</button>
+        <button class="btn primary" id="cellEditorSaveBtn" type="button">บันทึกเซลล์</button>
+      </div>
+    </div>
   </div>
 
   <div class="toast-stack" id="toastStack"></div>

@@ -19,6 +19,12 @@ const state = {
       lastSavedAt: null,
     },
   },
+  cellEditor: {
+    open: false,
+    editorKey: null,
+    rowIndex: -1,
+    colIndex: -1,
+  },
   isHydrating: false,
 };
 
@@ -76,6 +82,12 @@ const sheetEditorConfigs = {
     syncFromJsonBtn: "defaultSheetSyncFromJson",
     exportJsonBtn: "defaultSheetExportJson",
     clearBtn: "defaultSheetClear",
+    filterInput: "defaultSheetFilterInput",
+    pageSizeSelect: "defaultSheetPageSize",
+    prevPageBtn: "defaultSheetPrevPage",
+    nextPageBtn: "defaultSheetNextPage",
+    pageLabel: "defaultSheetPageLabel",
+    paginationInfo: "defaultSheetPaginationInfo",
     stats: "defaultSheetStats",
     empty: "defaultSheetEmpty",
   },
@@ -94,6 +106,12 @@ const sheetEditorConfigs = {
     syncFromJsonBtn: "versionSheetSyncFromJson",
     exportJsonBtn: "versionSheetExportJson",
     clearBtn: "versionSheetClear",
+    filterInput: "versionSheetFilterInput",
+    pageSizeSelect: "versionSheetPageSize",
+    prevPageBtn: "versionSheetPrevPage",
+    nextPageBtn: "versionSheetNextPage",
+    pageLabel: "versionSheetPageLabel",
+    paginationInfo: "versionSheetPaginationInfo",
     stats: "versionSheetStats",
     empty: "versionSheetEmpty",
   },
@@ -108,6 +126,10 @@ function createSheetEditorState() {
     columns: [],
     rows: [],
     mode: "table",
+    tableFilter: "",
+    page: 1,
+    pageSize: 25,
+    jsonSyncTimer: null,
   };
 }
 
@@ -282,6 +304,111 @@ function sheetEditorToArray(editorKey) {
   });
 }
 
+function getCellText(editorKey, rowIndex, colIndex) {
+  const editor = state.sheetEditors[editorKey];
+  const row = editor.rows[rowIndex];
+  const column = editor.columns[colIndex];
+  if (!row || !column) return "";
+  return normalizeCellValue(row[column]);
+}
+
+function setCellText(editorKey, rowIndex, colIndex, value) {
+  const editor = state.sheetEditors[editorKey];
+  const row = editor.rows[rowIndex];
+  const column = editor.columns[colIndex];
+  if (!row || !column) return;
+  row[column] = normalizeCellValue(value);
+}
+
+function getFilteredRowIndexes(editorKey) {
+  const editor = state.sheetEditors[editorKey];
+  const query = String(editor.tableFilter || "").trim().toLowerCase();
+
+  if (!query) {
+    return editor.rows.map((_, index) => index);
+  }
+
+  const indexes = [];
+  editor.rows.forEach((row, rowIndex) => {
+    const matched = editor.columns.some((column) => {
+      return normalizeCellValue(row[column]).toLowerCase().includes(query);
+    });
+    if (matched) {
+      indexes.push(rowIndex);
+    }
+  });
+  return indexes;
+}
+
+function ensureValidSheetPage(editorKey, filteredCount) {
+  const editor = state.sheetEditors[editorKey];
+  const safePageSize = Math.max(1, Number(editor.pageSize || 25));
+  const totalPages = Math.max(1, Math.ceil(filteredCount / safePageSize));
+  editor.page = Math.min(Math.max(1, editor.page), totalPages);
+  return totalPages;
+}
+
+function getVisibleRowIndexes(editorKey) {
+  const editor = state.sheetEditors[editorKey];
+  const filteredIndexes = getFilteredRowIndexes(editorKey);
+  const totalPages = ensureValidSheetPage(editorKey, filteredIndexes.length);
+  const safePageSize = Math.max(1, Number(editor.pageSize || 25));
+  const start = (editor.page - 1) * safePageSize;
+  const end = start + safePageSize;
+
+  return {
+    filteredIndexes,
+    visibleIndexes: filteredIndexes.slice(start, end),
+    totalPages,
+  };
+}
+
+function updateSheetPaginationControls(editorKey, context) {
+  const config = sheetEditorConfigs[editorKey];
+  const editor = state.sheetEditors[editorKey];
+  const totalRows = editor.rows.length;
+  const filteredRows = context.filteredIndexes.length;
+  const safePageSize = Math.max(1, Number(editor.pageSize || 25));
+  const start = filteredRows === 0 ? 0 : (editor.page - 1) * safePageSize + 1;
+  const end = Math.min(filteredRows, editor.page * safePageSize);
+
+  qs(config.paginationInfo).textContent = `${start}-${end} / ${filteredRows} (ทั้งหมด ${totalRows})`;
+  qs(config.pageLabel).textContent = `หน้า ${editor.page} / ${context.totalPages}`;
+  qs(config.prevPageBtn).disabled = editor.page <= 1;
+  qs(config.nextPageBtn).disabled = editor.page >= context.totalPages;
+  qs(config.pageSizeSelect).value = String(safePageSize);
+}
+
+function flushJsonSync(editorKey) {
+  const editor = state.sheetEditors[editorKey];
+  if (editor.jsonSyncTimer) {
+    clearTimeout(editor.jsonSyncTimer);
+    editor.jsonSyncTimer = null;
+  }
+  syncTableToJson(editorKey);
+}
+
+function setSheetFilter(editorKey, value) {
+  const editor = state.sheetEditors[editorKey];
+  editor.tableFilter = String(value || "").trim();
+  editor.page = 1;
+  renderSheetEditor(editorKey);
+}
+
+function setSheetPageSize(editorKey, value) {
+  const editor = state.sheetEditors[editorKey];
+  const parsed = Number.parseInt(value, 10);
+  editor.pageSize = Number.isFinite(parsed) && parsed > 0 ? parsed : 25;
+  editor.page = 1;
+  renderSheetEditor(editorKey);
+}
+
+function changeSheetPage(editorKey, delta) {
+  const editor = state.sheetEditors[editorKey];
+  editor.page = Math.max(1, editor.page + delta);
+  renderSheetEditor(editorKey);
+}
+
 function touchScope(scope) {
   if (state.isHydrating) return;
   markScopeDirty(scope, true);
@@ -321,8 +448,12 @@ function markScopeDirty(scope, dirty) {
 
 function captureEditorSnapshot(editorKey) {
   const config = sheetEditorConfigs[editorKey];
+  const editor = state.sheetEditors[editorKey];
   return {
-    mode: state.sheetEditors[editorKey].mode,
+    mode: editor.mode,
+    tableFilter: editor.tableFilter,
+    page: editor.page,
+    pageSize: editor.pageSize,
     tableData: sheetEditorToArray(editorKey),
     jsonText: qs(config.jsonInput).value,
   };
@@ -352,15 +483,23 @@ function getScopeSnapshot(scope) {
 
 function applyEditorSnapshot(editorKey, snapshot) {
   const config = sheetEditorConfigs[editorKey];
+  const editor = state.sheetEditors[editorKey];
   const tableData = Array.isArray(snapshot?.tableData) ? snapshot.tableData : [];
+  const parsedPage = Number.parseInt(snapshot?.page, 10);
+  const parsedPageSize = Number.parseInt(snapshot?.pageSize, 10);
   setSheetEditorData(editorKey, tableData);
+  editor.tableFilter = typeof snapshot?.tableFilter === "string" ? snapshot.tableFilter : "";
+  editor.page = Number.isFinite(parsedPage) ? Math.max(1, parsedPage) : 1;
+  editor.pageSize = Number.isFinite(parsedPageSize) ? Math.max(1, parsedPageSize) : 25;
 
   if (snapshot?.mode === "json") {
-    state.sheetEditors[editorKey].mode = "json";
+    editor.mode = "json";
     renderSheetEditor(editorKey);
     if (typeof snapshot.jsonText === "string") {
       qs(config.jsonInput).value = snapshot.jsonText;
     }
+  } else {
+    renderSheetEditor(editorKey);
   }
 }
 
@@ -568,12 +707,17 @@ function renderSheetEditor(editorKey) {
   qs(config.jsonPanel).classList.toggle("active", editor.mode === "json");
 
   qs(config.stats).textContent = `${editor.columns.length} คอลัมน์ • ${editor.rows.length} แถว`;
+  qs(config.filterInput).value = editor.tableFilter;
 
   const emptyEl = qs(config.empty);
   if (editor.columns.length === 0) {
     emptyEl.classList.remove("hidden");
     qs(config.head).innerHTML = "";
     qs(config.body).innerHTML = "";
+    updateSheetPaginationControls(editorKey, {
+      filteredIndexes: [],
+      totalPages: 1,
+    });
     return;
   }
 
@@ -605,24 +749,38 @@ function renderSheetEditor(editorKey) {
     </tr>
   `;
 
+  const viewport = getVisibleRowIndexes(editorKey);
+  updateSheetPaginationControls(editorKey, viewport);
+
   if (editor.rows.length === 0) {
     qs(config.body).innerHTML = `<tr><td colspan="${editor.columns.length + 2}">ยังไม่มีข้อมูล กด \"+ แถว\" เพื่อเพิ่มข้อมูล</td></tr>`;
     return;
   }
 
-  const bodyRows = editor.rows
-    .map((row, rowIndex) => {
+  if (viewport.visibleIndexes.length === 0) {
+    qs(config.body).innerHTML = `<tr><td colspan="${editor.columns.length + 2}">ไม่พบข้อมูลตามคำค้นหา</td></tr>`;
+    return;
+  }
+
+  const bodyRows = viewport.visibleIndexes
+    .map((rowIndex) => {
+      const row = editor.rows[rowIndex];
       const cells = editor.columns
         .map((column, colIndex) => {
+          const value = normalizeCellValue(row[column]);
+          const hasText = value.trim().length > 0;
           return `
             <td>
-              <input
-                class="sheet-cell"
-                data-role="cell"
+              <button
+                class="sheet-cell-preview"
+                data-role="open-cell-editor"
                 data-row-index="${rowIndex}"
                 data-col-index="${colIndex}"
-                value="${escapeHtml(normalizeCellValue(row[column]))}"
+                type="button"
+                title="คลิกเพื่อแก้ไขแบบหลายบรรทัด"
               >
+                <div class="sheet-cell-lines ${hasText ? "" : "empty"}">${hasText ? escapeHtml(value) : "(ว่าง)"}</div>
+              </button>
             </td>
           `;
         })
@@ -652,7 +810,7 @@ function setSheetEditorMode(editorKey, mode) {
 
   editor.mode = mode;
   if (mode === "json") {
-    syncTableToJson(editorKey);
+    flushJsonSync(editorKey);
   }
   renderSheetEditor(editorKey);
 }
@@ -674,8 +832,14 @@ function setSheetEditorData(editorKey, sheetData, preserveMode = false) {
   editor.columns = model.columns;
   editor.rows = model.rows;
   editor.mode = mode;
+  if (!preserveMode) {
+    editor.tableFilter = "";
+    editor.page = 1;
+  } else {
+    ensureValidSheetPage(editorKey, getFilteredRowIndexes(editorKey).length);
+  }
 
-  syncTableToJson(editorKey);
+  flushJsonSync(editorKey);
   renderSheetEditor(editorKey);
 }
 
@@ -707,7 +871,7 @@ function addSheetColumn(editorKey) {
     row[normalized] = "";
   });
 
-  syncTableToJson(editorKey);
+  flushJsonSync(editorKey);
   renderSheetEditor(editorKey);
   touchScope(editorKey);
 }
@@ -724,10 +888,15 @@ function addSheetRow(editorKey) {
     row[column] = "";
   });
   editor.rows.push(row);
+  editor.page = Math.max(1, Math.ceil(editor.rows.length / Math.max(1, editor.pageSize)));
 
-  syncTableToJson(editorKey);
+  flushJsonSync(editorKey);
   renderSheetEditor(editorKey);
   touchScope(editorKey);
+
+  if (editor.tableFilter) {
+    showToast("มีตัวกรองอยู่ แถวใหม่อาจไม่แสดงจนกว่าจะล้างคำค้นหา", "info");
+  }
 }
 
 function duplicateSheetRow(editorKey, rowIndex) {
@@ -742,7 +911,7 @@ function duplicateSheetRow(editorKey, rowIndex) {
 
   editor.rows.splice(rowIndex + 1, 0, clone);
 
-  syncTableToJson(editorKey);
+  flushJsonSync(editorKey);
   renderSheetEditor(editorKey);
   touchScope(editorKey);
 }
@@ -751,7 +920,7 @@ function removeSheetRow(editorKey, rowIndex) {
   const editor = state.sheetEditors[editorKey];
   editor.rows = editor.rows.filter((_, idx) => idx !== rowIndex);
 
-  syncTableToJson(editorKey);
+  flushJsonSync(editorKey);
   renderSheetEditor(editorKey);
   touchScope(editorKey);
 }
@@ -769,7 +938,7 @@ function removeSheetColumn(editorKey, colIndex) {
     delete row[removed];
   });
 
-  syncTableToJson(editorKey);
+  flushJsonSync(editorKey);
   renderSheetEditor(editorKey);
   touchScope(editorKey);
 }
@@ -797,20 +966,55 @@ function renameSheetColumn(editorKey, colIndex, rawName) {
     delete row[oldName];
   });
 
-  syncTableToJson(editorKey);
+  flushJsonSync(editorKey);
   renderSheetEditor(editorKey);
   touchScope(editorKey);
 }
 
 function updateSheetCell(editorKey, rowIndex, colIndex, value) {
-  const editor = state.sheetEditors[editorKey];
-  const row = editor.rows[rowIndex];
-  const column = editor.columns[colIndex];
-  if (!row || !column) return;
-
-  row[column] = value;
-  syncTableToJson(editorKey);
+  setCellText(editorKey, rowIndex, colIndex, value);
+  flushJsonSync(editorKey);
   touchScope(editorKey);
+}
+
+function updateCellEditorMeta() {
+  const text = qs("cellEditorTextarea").value || "";
+  const lines = text.length === 0 ? 1 : text.split("\n").length;
+  qs("cellEditorMeta").textContent = `ความยาว ${text.length} ตัวอักษร • ${lines} บรรทัด • ใช้ Ctrl/Cmd + Enter เพื่อบันทึก`;
+}
+
+function openCellEditor(editorKey, rowIndex, colIndex) {
+  const editor = state.sheetEditors[editorKey];
+  const column = editor.columns[colIndex];
+  if (!column) return;
+
+  state.cellEditor.open = true;
+  state.cellEditor.editorKey = editorKey;
+  state.cellEditor.rowIndex = rowIndex;
+  state.cellEditor.colIndex = colIndex;
+
+  qs("cellEditorTitle").textContent = `${editorKey === "default" ? "Default" : "Version"} • แถว ${rowIndex + 1} • คอลัมน์ ${column}`;
+  qs("cellEditorTextarea").value = getCellText(editorKey, rowIndex, colIndex);
+  updateCellEditorMeta();
+  qs("cellEditorModal").hidden = false;
+  qs("cellEditorTextarea").focus();
+}
+
+function closeCellEditor() {
+  state.cellEditor.open = false;
+  state.cellEditor.editorKey = null;
+  state.cellEditor.rowIndex = -1;
+  state.cellEditor.colIndex = -1;
+  qs("cellEditorModal").hidden = true;
+}
+
+function saveCellEditor() {
+  if (!state.cellEditor.open) return;
+
+  const { editorKey, rowIndex, colIndex } = state.cellEditor;
+  updateSheetCell(editorKey, rowIndex, colIndex, qs("cellEditorTextarea").value);
+  renderSheetEditor(editorKey);
+  closeCellEditor();
 }
 
 async function pasteSheetFromClipboard(editorKey) {
@@ -841,11 +1045,16 @@ function clearSheetData(editorKey) {
   const confirmed = window.confirm("ต้องการล้างตารางทั้งหมดหรือไม่?");
   if (!confirmed) return;
 
+  if (state.cellEditor.open && state.cellEditor.editorKey === editorKey) {
+    closeCellEditor();
+  }
+
   setSheetEditorData(editorKey, []);
   touchScope(editorKey);
 }
 
 function exportSheetData(editorKey) {
+  flushJsonSync(editorKey);
   const data = sheetEditorToArray(editorKey);
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   downloadJSONFile(`${editorKey}-sheet-data-${stamp}.json`, data);
@@ -862,7 +1071,7 @@ function collectSheetDataForSave(editorKey) {
   }
 
   const data = sheetEditorToArray(editorKey);
-  syncTableToJson(editorKey);
+  flushJsonSync(editorKey);
   return data;
 }
 
@@ -1038,6 +1247,10 @@ function renderImages() {
 }
 
 async function refreshAll() {
+  if (state.cellEditor.open) {
+    closeCellEditor();
+  }
+
   const [defaultData, versions, followups, images] = await Promise.all([
     fetchJSON("/api/default"),
     fetchJSON("/api/versions"),
@@ -1268,6 +1481,10 @@ function bindSheetEditorEvents(editorKey) {
 
   qs(config.exportJsonBtn).addEventListener("click", () => exportSheetData(editorKey));
   qs(config.clearBtn).addEventListener("click", () => clearSheetData(editorKey));
+  qs(config.filterInput).addEventListener("input", (event) => setSheetFilter(editorKey, event.target.value));
+  qs(config.pageSizeSelect).addEventListener("change", (event) => setSheetPageSize(editorKey, event.target.value));
+  qs(config.prevPageBtn).addEventListener("click", () => changeSheetPage(editorKey, -1));
+  qs(config.nextPageBtn).addEventListener("click", () => changeSheetPage(editorKey, 1));
 
   qs(config.jsonInput).addEventListener("input", () => touchScope(editorKey));
 
@@ -1285,15 +1502,15 @@ function bindSheetEditorEvents(editorKey) {
     removeSheetColumn(editorKey, colIndex);
   });
 
-  qs(config.body).addEventListener("input", (event) => {
-    const target = event.target.closest('input[data-role="cell"]');
-    if (!target) return;
-    const rowIndex = Number.parseInt(target.dataset.rowIndex, 10);
-    const colIndex = Number.parseInt(target.dataset.colIndex, 10);
-    updateSheetCell(editorKey, rowIndex, colIndex, target.value);
-  });
-
   qs(config.body).addEventListener("click", (event) => {
+    const openCellBtn = event.target.closest('button[data-role="open-cell-editor"]');
+    if (openCellBtn) {
+      const rowIndex = Number.parseInt(openCellBtn.dataset.rowIndex, 10);
+      const colIndex = Number.parseInt(openCellBtn.dataset.colIndex, 10);
+      openCellEditor(editorKey, rowIndex, colIndex);
+      return;
+    }
+
     const duplicateBtn = event.target.closest('button[data-role="duplicate-row"]');
     if (duplicateBtn) {
       const rowIndex = Number.parseInt(duplicateBtn.dataset.rowIndex, 10);
@@ -1310,6 +1527,7 @@ function bindSheetEditorEvents(editorKey) {
 
 function bindGlobalShortcuts() {
   document.addEventListener("keydown", (event) => {
+    if (state.cellEditor.open) return;
     const isSaveShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s";
     if (!isSaveShortcut) return;
 
@@ -1335,6 +1553,31 @@ function bindGlobalShortcuts() {
   });
 }
 
+function bindCellEditorEvents() {
+  qs("cellEditorCloseBtn").addEventListener("click", closeCellEditor);
+  qs("cellEditorCancelBtn").addEventListener("click", closeCellEditor);
+  qs("cellEditorSaveBtn").addEventListener("click", saveCellEditor);
+
+  qs("cellEditorTextarea").addEventListener("input", updateCellEditorMeta);
+  qs("cellEditorTextarea").addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      saveCellEditor();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCellEditor();
+    }
+  });
+
+  qs("cellEditorModal").addEventListener("click", (event) => {
+    if (event.target === qs("cellEditorModal")) {
+      closeCellEditor();
+    }
+  });
+}
+
 function bindEvents() {
   document.querySelectorAll(".menu-item").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
@@ -1343,6 +1586,7 @@ function bindEvents() {
   bindScopeDirtyTracking();
   bindSheetEditorEvents("default");
   bindSheetEditorEvents("version");
+  bindCellEditorEvents();
   bindGlobalShortcuts();
 
   qs("refreshAllBtn").addEventListener("click", async () => {
