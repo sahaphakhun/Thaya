@@ -196,6 +196,34 @@ async function initSchema() {
   `);
 
   await query(`
+    CREATE TABLE IF NOT EXISTS instruction_defaults (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      google_doc TEXT,
+      sheet_data JSONB NOT NULL DEFAULT '[]'::jsonb,
+      static_instructions TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      is_active BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS followup_rules (
+      id BIGSERIAL PRIMARY KEY,
+      step_index INTEGER NOT NULL UNIQUE,
+      delay_minutes INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  await query(`
     CREATE INDEX IF NOT EXISTS chat_history_sender_timestamp_idx
     ON chat_history (sender_id, timestamp);
   `);
@@ -218,6 +246,16 @@ async function initSchema() {
   await query(`
     CREATE INDEX IF NOT EXISTS instruction_versions_created_at_idx
     ON instruction_versions (created_at DESC);
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS instruction_defaults_active_updated_idx
+    ON instruction_defaults (is_active, updated_at DESC);
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS followup_rules_active_step_idx
+    ON followup_rules (is_active, step_index);
   `);
 }
 

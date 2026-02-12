@@ -38,6 +38,96 @@ function mapVersionRow(row) {
     };
 }
 
+function mapDefaultRow(row) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        name: row.name || 'Default Instruction',
+        description: row.description || '',
+        googleDoc: row.google_doc || '',
+        sheetData: row.sheet_data || [],
+        sheetRaw: [],
+        staticInstructions: row.static_instructions || '',
+        source: row.source || 'manual',
+        isActive: row.is_active === true,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+    };
+}
+
+function mapFollowupRuleRow(row) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        stepIndex: row.step_index,
+        delayMinutes: row.delay_minutes,
+        message: row.message || '',
+        source: row.source || 'manual',
+        isActive: row.is_active === true,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+    };
+}
+
+function normalizeDefaultPayload(body = {}) {
+    const rawSheetData = body.sheetData;
+    return {
+        id: 'default',
+        name: String(body.name || 'Default Instruction').trim() || 'Default Instruction',
+        description: String(body.description || '').trim(),
+        googleDoc: String(body.googleDoc || ''),
+        sheetData: Array.isArray(rawSheetData) ? rawSheetData : [],
+        staticInstructions: String(body.staticInstructions || ''),
+        source: String(body.source || 'manual').trim() || 'manual',
+        isActive: body.isActive === undefined ? true : Boolean(body.isActive),
+    };
+}
+
+function normalizeFollowupRulesPayload(body = {}) {
+    const rawList = Array.isArray(body) ? body : body.rules;
+    if (!Array.isArray(rawList)) {
+        return { ok: false, error: 'rules must be an array' };
+    }
+
+    const normalized = [];
+    for (let i = 0; i < rawList.length; i += 1) {
+        const rule = rawList[i] || {};
+        const delayMinutes = Number.parseInt(
+            String(rule.delayMinutes ?? rule.delay_minutes ?? rule.time ?? ''),
+            10
+        );
+        const message = String(rule.message || '').trim();
+        const providedStep = Number.parseInt(String(rule.stepIndex ?? rule.step_index ?? i), 10);
+        const stepIndex = Number.isFinite(providedStep) ? providedStep : i;
+        const isActive = rule.isActive === undefined ? true : Boolean(rule.isActive);
+
+        if (!Number.isFinite(delayMinutes) || delayMinutes <= 0) {
+            return { ok: false, error: `Invalid delayMinutes at index ${i}` };
+        }
+        if (!message) {
+            return { ok: false, error: `message is required at index ${i}` };
+        }
+
+        normalized.push({
+            stepIndex,
+            delayMinutes,
+            message,
+            isActive,
+        });
+    }
+
+    const stepSet = new Set();
+    for (const rule of normalized) {
+        if (stepSet.has(rule.stepIndex)) {
+            return { ok: false, error: `Duplicate stepIndex: ${rule.stepIndex}` };
+        }
+        stepSet.add(rule.stepIndex);
+    }
+
+    normalized.sort((a, b) => a.stepIndex - b.stepIndex);
+    return { ok: true, rules: normalized };
+}
+
 // ====================== Google API Functions ======================
 async function fetchGoogleDocInstructions() {
     try {
@@ -124,9 +214,21 @@ router.get('/versions', async (req, res) => {
     }
 });
 
-// Get default instruction (from Google)
+// Get default instruction (DB-first, fallback to Google)
 router.get('/default', async (req, res) => {
     try {
+        const dbDefaultResult = await query(
+            `SELECT *
+             FROM instruction_defaults
+             WHERE is_active = true
+             ORDER BY updated_at DESC
+             LIMIT 1`
+        );
+        const dbDefault = mapDefaultRow(dbDefaultResult.rows?.[0]);
+        if (dbDefault) {
+            return res.json(dbDefault);
+        }
+
         const googleDocInstructions = await fetchGoogleDocInstructions();
         const sheetRows = await fetchSheetData();
         const sheetJSON = transformSheetRowsToJSON(sheetRows);
@@ -142,6 +244,111 @@ router.get('/default', async (req, res) => {
         };
 
         res.json(defaultData);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Upsert default instruction (DB-first)
+router.put('/default', async (req, res) => {
+    try {
+        const payload = normalizeDefaultPayload(req.body);
+        const now = new Date();
+
+        if (payload.isActive) {
+            await query(`UPDATE instruction_defaults SET is_active = false, updated_at = $1`, [now]);
+        }
+
+        const result = await query(
+            `INSERT INTO instruction_defaults
+              (id, name, description, google_doc, sheet_data, static_instructions, source, is_active, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (id)
+             DO UPDATE SET
+               name = EXCLUDED.name,
+               description = EXCLUDED.description,
+               google_doc = EXCLUDED.google_doc,
+               sheet_data = EXCLUDED.sheet_data,
+               static_instructions = EXCLUDED.static_instructions,
+               source = EXCLUDED.source,
+               is_active = EXCLUDED.is_active,
+               updated_at = EXCLUDED.updated_at
+             RETURNING *`,
+            [
+                payload.id,
+                payload.name,
+                payload.description,
+                payload.googleDoc,
+                payload.sheetData,
+                payload.staticInstructions,
+                payload.source,
+                payload.isActive,
+                now,
+                now,
+            ]
+        );
+
+        res.json(mapDefaultRow(result.rows?.[0]));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get follow-up rules (DB)
+router.get('/followups', async (req, res) => {
+    try {
+        const result = await query(
+            `SELECT *
+             FROM followup_rules
+             ORDER BY step_index ASC`
+        );
+        res.json((result.rows || []).map(mapFollowupRuleRow));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Replace follow-up rules (DB)
+router.put('/followups', async (req, res) => {
+    try {
+        const parsed = normalizeFollowupRulesPayload(req.body);
+        if (!parsed.ok) {
+            return res.status(400).json({ error: parsed.error });
+        }
+
+        const now = new Date();
+        await query(`UPDATE followup_rules SET is_active = false, updated_at = $1`, [now]);
+
+        for (const rule of parsed.rules) {
+            await query(
+                `INSERT INTO followup_rules
+                  (step_index, delay_minutes, message, source, is_active, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT (step_index)
+                 DO UPDATE SET
+                   delay_minutes = EXCLUDED.delay_minutes,
+                   message = EXCLUDED.message,
+                   source = EXCLUDED.source,
+                   is_active = EXCLUDED.is_active,
+                   updated_at = EXCLUDED.updated_at`,
+                [
+                    rule.stepIndex,
+                    rule.delayMinutes,
+                    rule.message,
+                    'manual',
+                    rule.isActive,
+                    now,
+                    now,
+                ]
+            );
+        }
+
+        const result = await query(
+            `SELECT *
+             FROM followup_rules
+             ORDER BY step_index ASC`
+        );
+        res.json((result.rows || []).map(mapFollowupRuleRow));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

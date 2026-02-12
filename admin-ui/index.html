@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>THAYA Admin Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="backdrop"></div>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>THAYA</h1>
+        <p>Admin Console</p>
+      </div>
+
+      <nav class="menu">
+        <button class="menu-item active" data-view="dashboard">Dashboard</button>
+        <button class="menu-item" data-view="default">Default Instruction</button>
+        <button class="menu-item" data-view="versions">Versions</button>
+        <button class="menu-item" data-view="build">Build / Preview</button>
+        <button class="menu-item" data-view="followups">Follow-up Rules</button>
+        <button class="menu-item" data-view="images">Images</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="btn ghost" id="refreshAllBtn">Refresh All</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div>
+          <h2 id="viewTitle">Dashboard</h2>
+          <p id="viewSubtitle">ภาพรวมระบบหลังบ้าน</p>
+        </div>
+        <div class="status-wrap">
+          <span class="chip" id="defaultSourceChip">Source: -</span>
+        </div>
+      </header>
+
+      <section class="view active" id="dashboardView">
+        <div class="card-grid">
+          <article class="card">
+            <h3>Active Default</h3>
+            <p class="big" id="activeDefaultName">-</p>
+          </article>
+          <article class="card">
+            <h3>Active Version</h3>
+            <p class="big" id="activeVersionName">-</p>
+          </article>
+          <article class="card">
+            <h3>Total Versions</h3>
+            <p class="big" id="totalVersionsCount">0</p>
+          </article>
+          <article class="card">
+            <h3>Follow-up Rules</h3>
+            <p class="big" id="followupCount">0</p>
+          </article>
+          <article class="card">
+            <h3>Images</h3>
+            <p class="big" id="imageCount">0</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="defaultView">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Default Instruction (DB)</h3>
+            <div class="row-inline">
+              <button class="btn ghost" id="reloadDefaultBtn">โหลดใหม่</button>
+              <button class="btn primary" id="saveDefaultBtn">บันทึก</button>
+            </div>
+          </div>
+
+          <div class="form-grid two">
+            <label>
+              <span>ชื่อ</span>
+              <input id="defaultName" type="text" placeholder="Default Instruction">
+            </label>
+            <label>
+              <span>คำอธิบาย</span>
+              <input id="defaultDesc" type="text" placeholder="คำอธิบาย">
+            </label>
+          </div>
+
+          <label>
+            <span>Source</span>
+            <select id="defaultSource">
+              <option value="manual">manual</option>
+              <option value="code">code</option>
+              <option value="google">google</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Google Doc Content</span>
+            <textarea id="defaultGoogleDoc" rows="10"></textarea>
+          </label>
+
+          <label>
+            <span>Sheet Data JSON</span>
+            <textarea id="defaultSheetJson" class="mono" rows="10"></textarea>
+          </label>
+
+          <label>
+            <span>Static Instructions</span>
+            <textarea id="defaultStatic" rows="8"></textarea>
+          </label>
+        </div>
+      </section>
+
+      <section class="view" id="versionsView">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>เวอร์ชันทั้งหมด</h3>
+            <div class="row-inline">
+              <input id="versionsSearch" type="search" placeholder="ค้นหาเวอร์ชัน...">
+              <button class="btn ghost" id="importVersionBtn">Import JSON</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ชื่อ</th>
+                  <th>สถานะ</th>
+                  <th>อัปเดตล่าสุด</th>
+                  <th>จัดการ</th>
+                </tr>
+              </thead>
+              <tbody id="versionsTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>แก้ไข/สร้างเวอร์ชัน</h3>
+            <div class="row-inline">
+              <button class="btn ghost" id="newVersionBtn">สร้างใหม่</button>
+              <button class="btn primary" id="saveVersionBtn">บันทึกเวอร์ชัน</button>
+            </div>
+          </div>
+
+          <input id="versionId" type="hidden">
+          <div class="form-grid two">
+            <label>
+              <span>ชื่อเวอร์ชัน</span>
+              <input id="versionName" type="text">
+            </label>
+            <label>
+              <span>คำอธิบาย</span>
+              <input id="versionDesc" type="text">
+            </label>
+          </div>
+
+          <label>
+            <span>Google Doc Content</span>
+            <textarea id="versionGoogleDoc" rows="8"></textarea>
+          </label>
+
+          <label>
+            <span>Sheet Data JSON</span>
+            <textarea id="versionSheetJson" class="mono" rows="8"></textarea>
+          </label>
+
+          <label>
+            <span>Static Instructions</span>
+            <textarea id="versionStatic" rows="6"></textarea>
+          </label>
+        </div>
+      </section>
+
+      <section class="view" id="buildView">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Build / Preview</h3>
+            <div class="row-inline">
+              <select id="buildSource"></select>
+              <select id="buildFormat">
+                <option value="pretty">Pretty</option>
+                <option value="compact">Compact</option>
+              </select>
+              <button class="btn primary" id="buildBtn">Build</button>
+            </div>
+          </div>
+
+          <div class="stats-line">
+            <span>Tokens: <strong id="buildTokens">-</strong></span>
+            <span>Cost est.: <strong id="buildCost">-</strong></span>
+          </div>
+          <pre id="buildOutput" class="output">คลิก Build เพื่อสร้างผลลัพธ์</pre>
+        </div>
+      </section>
+
+      <section class="view" id="followupsView">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Follow-up Rules</h3>
+            <div class="row-inline">
+              <button class="btn ghost" id="addFollowupBtn">เพิ่มแถว</button>
+              <button class="btn primary" id="saveFollowupsBtn">บันทึก</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Step</th>
+                  <th>Delay (minutes)</th>
+                  <th>Message</th>
+                  <th>Active</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="followupTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="imagesView">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Image Manager</h3>
+            <button class="btn ghost" id="reloadImagesBtn">โหลดรูปใหม่</button>
+          </div>
+
+          <div class="form-grid four">
+            <label>
+              <span>ไฟล์รูป</span>
+              <input id="imageFile" type="file" accept="image/*">
+            </label>
+            <label>
+              <span>Key</span>
+              <input id="imageKey" type="text" placeholder="product_1">
+            </label>
+            <label>
+              <span>Name</span>
+              <input id="imageName" type="text" placeholder="รูปสินค้า 1">
+            </label>
+            <label>
+              <span>Category</span>
+              <input id="imageCategory" type="text" placeholder="product">
+            </label>
+          </div>
+
+          <button class="btn primary" id="uploadImageBtn">อัปโหลดรูป</button>
+        </div>
+
+        <div class="image-grid" id="imageGrid"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-stack" id="toastStack"></div>
+  <script src="app.js"></script>
+</body>
+</html>

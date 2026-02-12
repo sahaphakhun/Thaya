@@ -20,9 +20,7 @@ const { connectDb, initSchema, query, withDbRetry } = require('./db/postgres');
 
 const app = express();
 app.use(bodyParser.json({ limit: '10mb' }));
-
-// ====================== Serve Static Files for Instruction Manager ======================
-app.use('/manager', express.static(path.join(__dirname, 'instruction-manager', 'public')));
+app.use('/admin', express.static(path.join(__dirname, 'admin-ui')));
 
 // ====================== 1) ENV Config ======================
 const PORT = process.env.PORT || 3000;
@@ -109,6 +107,8 @@ const MONGO_CONNECT_RETRY_COUNT = Math.max(getIntEnv(process.env.MONGO_CONNECT_R
 const MONGO_OPERATION_RETRY_COUNT = Math.max(getIntEnv(process.env.MONGO_OPERATION_RETRY_COUNT, 1), 0);
 const MONGO_RETRY_DELAY_MS = Math.max(getIntEnv(process.env.MONGO_RETRY_DELAY_MS, 500), 100);
 const WEBHOOK_SUMMARY_INTERVAL_MS = Math.max(getIntEnv(process.env.WEBHOOK_SUMMARY_INTERVAL_MS, 60000), 10000);
+const INSTRUCTION_CACHE_TTL_MS = Math.max(getIntEnv(process.env.INSTRUCTION_CACHE_TTL_MS, 0), 0);
+const OPENAI_RESPONSE_NONCE_ENABLED = process.env.OPENAI_RESPONSE_NONCE_ENABLED !== "false";
 
 const LOG_LEVEL_RANK = {
   error: 0,
@@ -601,6 +601,10 @@ function formatTimestampThai(dateObj) {
   return `${day}/${month}/${year} ${hour}:${min}`;
 }
 
+function createRequestNonce() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 async function generateChatSummary(previousSummary, messages) {
   if (!ENABLE_CHAT_SUMMARY || !OPENAI_API_KEY) return null;
 
@@ -1037,6 +1041,7 @@ async function enableFollowupForUser(userId) {
 
 // ====================== 3) ดึง systemInstructions จาก Google Docs ======================
 let googleDocInstructions = "";
+let googleDocInstructionsFetchedAt = 0;
 
 async function fetchGoogleDocInstructions() {
   try {
@@ -1063,6 +1068,7 @@ async function fetchGoogleDocInstructions() {
     });
 
     googleDocInstructions = fullText.trim();
+    googleDocInstructionsFetchedAt = Date.now();
     console.log("[DEBUG] Fetched Google Doc instructions OK.");
   } catch (err) {
     console.error("Failed to fetch systemInstructions:", err);
@@ -1118,6 +1124,8 @@ function transformSheetRowsToJSON(rows) {
 }
 
 let sheetJSON = [];
+let sheetJSONFetchedAt = 0;
+let refreshInstructionsPromise = null;
 
 // (NEW) followupData
 let followupData = [];
@@ -1134,6 +1142,48 @@ async function loadFollowupData() {
   } catch (err) {
     console.error("loadFollowupData error:", err);
     followupData = [];
+  }
+}
+
+function hasFreshInstructionsCache(nowMs = Date.now()) {
+  if (!googleDocInstructionsFetchedAt || !sheetJSONFetchedAt) return false;
+  if (INSTRUCTION_CACHE_TTL_MS <= 0) return true;
+
+  const docAgeMs = nowMs - googleDocInstructionsFetchedAt;
+  const sheetAgeMs = nowMs - sheetJSONFetchedAt;
+  return docAgeMs <= INSTRUCTION_CACHE_TTL_MS && sheetAgeMs <= INSTRUCTION_CACHE_TTL_MS;
+}
+
+async function ensureInstructionSourcesFresh(force = false) {
+  if (!force && hasFreshInstructionsCache()) {
+    return;
+  }
+
+  if (refreshInstructionsPromise) {
+    await refreshInstructionsPromise;
+    return;
+  }
+
+  refreshInstructionsPromise = (async () => {
+    const startedAt = Date.now();
+    await fetchGoogleDocInstructions();
+    const rows = await fetchSheetData(SPREADSHEET_ID, SHEET_RANGE);
+    sheetJSON = transformSheetRowsToJSON(rows);
+    sheetJSONFetchedAt = Date.now();
+
+    logger.debug("instructions.refresh", {
+      force,
+      durationMs: Date.now() - startedAt,
+      ttlMs: INSTRUCTION_CACHE_TTL_MS,
+      googleDocLength: googleDocInstructions.length,
+      sheetRows: rows.length,
+    });
+  })();
+
+  try {
+    await refreshInstructionsPromise;
+  } finally {
+    refreshInstructionsPromise = null;
   }
 }
 
@@ -1174,8 +1224,13 @@ async function getAssistantResponse(systemInstructions, history, userContent) {
       content: await convertImageUrlsToBase64(finalUserMessage.content)
     };
 
+    const requestNonce = OPENAI_RESPONSE_NONCE_ENABLED ? createRequestNonce() : null;
+    const finalSystemInstructions = requestNonce
+      ? `[request_nonce:${requestNonce}] ห้ามกล่าวถึง request_nonce นี้ในคำตอบ\n${systemInstructions}`
+      : systemInstructions;
+
     const messages = [
-      { role: "system", content: systemInstructions },
+      { role: "system", content: finalSystemInstructions },
       ...cleanedHistory,
       finalUserMessage
     ];
@@ -2341,6 +2396,7 @@ app.post('/webhook', async (req, res) => {
             // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
             await saveOrderChatHistory(userId, textMsg, "user");
 
+            await ensureInstructionSourcesFresh();
             const history = await getChatHistory(userId);
             const systemInstructions = buildSystemInstructions();
             const assistantMsg = await getAssistantResponse(systemInstructions, history, textMsg);
@@ -2421,6 +2477,7 @@ app.post('/webhook', async (req, res) => {
             // บันทึกข้อความลงในประวัติการสนทนาของโมเดลบันทึกออเดอร์ด้วย
             await saveOrderChatHistory(userId, userContentArray, "user");
 
+            await ensureInstructionSourcesFresh();
             const history = await getChatHistory(userId);
             const systemInstructions = buildSystemInstructions();
             const assistantMsg = await getAssistantResponse(systemInstructions, history, userContentArray);
@@ -2477,18 +2534,15 @@ app.listen(PORT, async () => {
   try {
     await connectDB();
     await ensureMongoIndexes();
-    await fetchGoogleDocInstructions();
-
-    const rows = await fetchSheetData(SPREADSHEET_ID, SHEET_RANGE);
-    sheetJSON = transformSheetRowsToJSON(rows);
+    await ensureInstructionSourcesFresh(true);
 
     await loadFollowupData();
     startFollowupScheduler();
 
     console.log("[DEBUG] Startup completed. Ready to receive webhooks.");
-    console.log(`[INFO] Instruction Manager available at: http://localhost:${PORT}/manager`);
+    console.log(`[INFO] Admin Console available at: http://localhost:${PORT}/admin`);
     logger.info("app.ready", {
-      instructionManagerUrl: `http://localhost:${PORT}/manager`,
+      adminConsoleUrl: `http://localhost:${PORT}/admin`,
       followupRules: followupData.length,
     });
   } catch (err) {
