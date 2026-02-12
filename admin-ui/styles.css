@@ -133,6 +133,24 @@ body {
   font-weight: 600;
 }
 
+.chip.subtle {
+  background: #eef8f6;
+  border-color: #c9dedb;
+  color: #155650;
+}
+
+.chip.ok {
+  background: #e8f7ec;
+  border-color: #badfca;
+  color: #145d3a;
+}
+
+.chip.warn {
+  background: #fff4ea;
+  border-color: #f3cfb6;
+  color: #9a4510;
+}
+
 .view {
   display: none;
 }
@@ -195,6 +213,10 @@ body {
   gap: 8px;
 }
 
+.row-inline.wrap {
+  flex-wrap: wrap;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -254,6 +276,11 @@ textarea {
   font-weight: 600;
 }
 
+.btn.small {
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
 .btn.primary {
   color: #fff;
   background: linear-gradient(130deg, var(--primary), var(--primary-dark));
@@ -263,6 +290,12 @@ textarea {
   color: var(--text);
   border-color: var(--line);
   background: #fff;
+}
+
+.btn.ghost.danger-text {
+  color: #9e3a10;
+  border-color: #efc9b2;
+  background: #fff8f4;
 }
 
 .btn.warn {
@@ -279,6 +312,194 @@ textarea {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 10px;
+}
+
+.instruction-panel {
+  padding: 18px;
+}
+
+.instruction-workbench {
+  display: grid;
+  gap: 12px;
+}
+
+.hint-line {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.hint-line code {
+  background: #eff4f2;
+  border: 1px solid #d8e0dc;
+  border-radius: 7px;
+  padding: 2px 6px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.work-block {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcf8 100%);
+  padding: 14px;
+}
+
+.work-block h4 {
+  margin: 0;
+  font-size: 17px;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.work-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.work-note {
+  margin: 4px 0 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.sheet-editor {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.sheet-toolbar {
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #f7faf8 0%, #f4f7f4 100%);
+  padding: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.seg-btn {
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: #fff;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.segmented .seg-btn:last-child {
+  border-right: 0;
+}
+
+.seg-btn.active {
+  background: #0f766e;
+  color: #fff;
+}
+
+.sheet-mode-panel {
+  display: none;
+  padding: 10px;
+}
+
+.sheet-mode-panel.active {
+  display: block;
+}
+
+.sheet-empty {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px dashed #bdd2cf;
+  background: #f4fbf9;
+  color: #2d5a55;
+  font-size: 13px;
+}
+
+.sheet-empty.hidden {
+  display: none;
+}
+
+.sheet-table {
+  min-width: 560px;
+}
+
+.sheet-table th {
+  min-width: 180px;
+}
+
+.sheet-table th:last-child {
+  min-width: 120px;
+  width: 120px;
+}
+
+.sheet-table .row-index-head {
+  min-width: 54px;
+  width: 54px;
+}
+
+.sheet-row-index {
+  text-align: center;
+  font-weight: 600;
+  color: #2b4c48;
+  background: #f6faf8;
+}
+
+.sheet-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sheet-col-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sheet-col-name {
+  min-width: 130px;
+  border-radius: 7px;
+  border: 1px solid #bfd1ce;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #fff;
+}
+
+.sheet-cell {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #cbd6d3;
+  padding: 7px 8px;
+  font-size: 13px;
+  min-height: 34px;
+}
+
+.sheet-action-btn {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.sheet-action-btn.danger {
+  color: #8b1b1b;
+  border-color: #e2b8b8;
+  background: #fff5f5;
 }
 
 table {
@@ -414,5 +635,24 @@ td .tiny-actions button {
   .form-grid.two,
   .form-grid.four {
     grid-template-columns: 1fr;
+  }
+
+  .work-head-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .sheet-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .segmented {
+    width: 100%;
+  }
+
+  .seg-btn {
+    flex: 1;
+    text-align: center;
   }
 }

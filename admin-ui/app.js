@@ -3,6 +3,23 @@ const state = {
   versions: [],
   followups: [],
   images: [],
+  sheetEditors: {
+    default: createSheetEditorState(),
+    version: createSheetEditorState(),
+  },
+  drafts: {
+    default: {
+      dirty: false,
+      timer: null,
+      lastSavedAt: null,
+    },
+    version: {
+      dirty: false,
+      timer: null,
+      lastSavedAt: null,
+    },
+  },
+  isHydrating: false,
 };
 
 const views = {
@@ -32,8 +49,75 @@ const views = {
   },
 };
 
+const formScopeConfigs = {
+  default: {
+    dirtyChip: "defaultDirtyChip",
+    storageKey: "thaya_admin_draft_default_v1",
+  },
+  version: {
+    dirtyChip: "versionDirtyChip",
+    storageKey: "thaya_admin_draft_version_v1",
+  },
+};
+
+const sheetEditorConfigs = {
+  default: {
+    modeTableBtn: "defaultSheetModeTable",
+    modeJsonBtn: "defaultSheetModeJson",
+    tablePanel: "defaultSheetTablePanel",
+    jsonPanel: "defaultSheetJsonPanel",
+    head: "defaultSheetHead",
+    body: "defaultSheetBody",
+    jsonInput: "defaultSheetJson",
+    addColumnBtn: "defaultSheetAddColumn",
+    addRowBtn: "defaultSheetAddRow",
+    pasteBtn: "defaultSheetPasteTable",
+    syncToJsonBtn: "defaultSheetSyncToJson",
+    syncFromJsonBtn: "defaultSheetSyncFromJson",
+    exportJsonBtn: "defaultSheetExportJson",
+    clearBtn: "defaultSheetClear",
+    stats: "defaultSheetStats",
+    empty: "defaultSheetEmpty",
+  },
+  version: {
+    modeTableBtn: "versionSheetModeTable",
+    modeJsonBtn: "versionSheetModeJson",
+    tablePanel: "versionSheetTablePanel",
+    jsonPanel: "versionSheetJsonPanel",
+    head: "versionSheetHead",
+    body: "versionSheetBody",
+    jsonInput: "versionSheetJson",
+    addColumnBtn: "versionSheetAddColumn",
+    addRowBtn: "versionSheetAddRow",
+    pasteBtn: "versionSheetPasteTable",
+    syncToJsonBtn: "versionSheetSyncToJson",
+    syncFromJsonBtn: "versionSheetSyncFromJson",
+    exportJsonBtn: "versionSheetExportJson",
+    clearBtn: "versionSheetClear",
+    stats: "versionSheetStats",
+    empty: "versionSheetEmpty",
+  },
+};
+
 function qs(id) {
   return document.getElementById(id);
+}
+
+function createSheetEditorState() {
+  return {
+    columns: [],
+    rows: [],
+    mode: "table",
+  };
+}
+
+function withHydration(task) {
+  state.isHydrating = true;
+  try {
+    task();
+  } finally {
+    state.isHydrating = false;
+  }
 }
 
 function escapeHtml(value) {
@@ -93,6 +177,12 @@ function switchView(viewId) {
   qs("viewSubtitle").textContent = views[viewId].subtitle;
 }
 
+function getActiveViewId() {
+  const active = document.querySelector(".view.active");
+  if (!active) return "";
+  return active.id.replace(/View$/, "");
+}
+
 function updateDashboard() {
   const activeVersion = state.versions.find((v) => v.isActive);
   qs("activeDefaultName").textContent = state.defaultData?.name || "default";
@@ -103,14 +193,711 @@ function updateDashboard() {
   qs("defaultSourceChip").textContent = `Source: ${state.defaultData?.source || "unknown"}`;
 }
 
+function normalizeCellValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch (err) {
+    return String(value);
+  }
+}
+
+function parseSheetJsonText(text) {
+  let parsed = [];
+  try {
+    parsed = JSON.parse(text || "[]");
+  } catch (err) {
+    throw new Error(`JSON ไม่ถูกต้อง: ${err.message}`);
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("Sheet Data ต้องเป็น JSON array เท่านั้น");
+  }
+
+  for (let i = 0; i < parsed.length; i += 1) {
+    const row = parsed[i];
+    const validObject = row && typeof row === "object" && !Array.isArray(row);
+    if (!validObject) {
+      throw new Error(`ข้อมูลแถวที่ ${i + 1} ต้องเป็น object เช่น { \"key\": \"value\" }`);
+    }
+  }
+
+  return parsed;
+}
+
+function makeUniqueColumnName(rawName, existingColumns, skipIndex = -1) {
+  const base = String(rawName || "").trim();
+  if (!base) return "";
+
+  const used = existingColumns
+    .map((name, idx) => (idx === skipIndex ? "" : String(name || "").trim()))
+    .filter(Boolean);
+
+  if (!used.includes(base)) return base;
+
+  let suffix = 2;
+  let candidate = `${base}_${suffix}`;
+  while (used.includes(candidate)) {
+    suffix += 1;
+    candidate = `${base}_${suffix}`;
+  }
+  return candidate;
+}
+
+function buildTableModelFromSheetData(sheetData) {
+  const rows = Array.isArray(sheetData) ? sheetData : [];
+  const columns = [];
+
+  rows.forEach((row) => {
+    Object.keys(row || {}).forEach((key) => {
+      if (!columns.includes(key)) {
+        columns.push(key);
+      }
+    });
+  });
+
+  const normalizedRows = rows.map((row) => {
+    const nextRow = {};
+    columns.forEach((column) => {
+      nextRow[column] = normalizeCellValue(row?.[column]);
+    });
+    return nextRow;
+  });
+
+  return { columns, rows: normalizedRows };
+}
+
+function sheetEditorToArray(editorKey) {
+  const editor = state.sheetEditors[editorKey];
+  return editor.rows.map((row) => {
+    const obj = {};
+    editor.columns.forEach((column) => {
+      obj[column] = normalizeCellValue(row?.[column]);
+    });
+    return obj;
+  });
+}
+
+function touchScope(scope) {
+  if (state.isHydrating) return;
+  markScopeDirty(scope, true);
+  scheduleDraftSave(scope);
+}
+
+function updateDirtyChip(scope) {
+  const config = formScopeConfigs[scope];
+  const chip = qs(config.dirtyChip);
+  if (!chip) return;
+
+  if (state.drafts[scope].dirty) {
+    chip.textContent = "ยังไม่บันทึก";
+    chip.classList.remove("ok");
+    chip.classList.add("warn");
+  } else {
+    chip.textContent = "บันทึกแล้ว";
+    chip.classList.remove("warn");
+    chip.classList.add("ok");
+  }
+
+  if (state.drafts[scope].lastSavedAt) {
+    chip.title = `Draft ล่าสุด ${formatDate(state.drafts[scope].lastSavedAt)}`;
+  } else {
+    chip.removeAttribute("title");
+  }
+}
+
+function markScopeDirty(scope, dirty) {
+  state.drafts[scope].dirty = Boolean(dirty);
+  if (!dirty && state.drafts[scope].timer) {
+    clearTimeout(state.drafts[scope].timer);
+    state.drafts[scope].timer = null;
+  }
+  updateDirtyChip(scope);
+}
+
+function captureEditorSnapshot(editorKey) {
+  const config = sheetEditorConfigs[editorKey];
+  return {
+    mode: state.sheetEditors[editorKey].mode,
+    tableData: sheetEditorToArray(editorKey),
+    jsonText: qs(config.jsonInput).value,
+  };
+}
+
+function getScopeSnapshot(scope) {
+  if (scope === "default") {
+    return {
+      name: qs("defaultName").value,
+      description: qs("defaultDesc").value,
+      source: qs("defaultSource").value,
+      googleDoc: qs("defaultGoogleDoc").value,
+      staticInstructions: qs("defaultStatic").value,
+      editor: captureEditorSnapshot("default"),
+    };
+  }
+
+  return {
+    id: qs("versionId").value,
+    name: qs("versionName").value,
+    description: qs("versionDesc").value,
+    googleDoc: qs("versionGoogleDoc").value,
+    staticInstructions: qs("versionStatic").value,
+    editor: captureEditorSnapshot("version"),
+  };
+}
+
+function applyEditorSnapshot(editorKey, snapshot) {
+  const config = sheetEditorConfigs[editorKey];
+  const tableData = Array.isArray(snapshot?.tableData) ? snapshot.tableData : [];
+  setSheetEditorData(editorKey, tableData);
+
+  if (snapshot?.mode === "json") {
+    state.sheetEditors[editorKey].mode = "json";
+    renderSheetEditor(editorKey);
+    if (typeof snapshot.jsonText === "string") {
+      qs(config.jsonInput).value = snapshot.jsonText;
+    }
+  }
+}
+
+function applyScopeSnapshot(scope, snapshot) {
+  withHydration(() => {
+    if (scope === "default") {
+      qs("defaultName").value = snapshot?.name || "Default Instruction";
+      qs("defaultDesc").value = snapshot?.description || "";
+      qs("defaultSource").value = snapshot?.source || "manual";
+      qs("defaultGoogleDoc").value = snapshot?.googleDoc || "";
+      qs("defaultStatic").value = snapshot?.staticInstructions || "";
+      applyEditorSnapshot("default", snapshot?.editor || {});
+      return;
+    }
+
+    qs("versionId").value = snapshot?.id || "";
+    qs("versionName").value = snapshot?.name || "";
+    qs("versionDesc").value = snapshot?.description || "";
+    qs("versionGoogleDoc").value = snapshot?.googleDoc || "";
+    qs("versionStatic").value = snapshot?.staticInstructions || "";
+    applyEditorSnapshot("version", snapshot?.editor || {});
+  });
+}
+
+function scheduleDraftSave(scope) {
+  const draft = state.drafts[scope];
+  if (draft.timer) {
+    clearTimeout(draft.timer);
+  }
+
+  draft.timer = setTimeout(() => {
+    saveDraft(scope);
+  }, 650);
+}
+
+function saveDraft(scope) {
+  try {
+    const config = formScopeConfigs[scope];
+    const payload = {
+      updatedAt: new Date().toISOString(),
+      data: getScopeSnapshot(scope),
+    };
+
+    window.localStorage.setItem(config.storageKey, JSON.stringify(payload));
+    state.drafts[scope].lastSavedAt = payload.updatedAt;
+    updateDirtyChip(scope);
+  } catch (err) {
+    console.warn(`saveDraft(${scope}) failed`, err);
+  }
+}
+
+function clearDraft(scope) {
+  try {
+    const config = formScopeConfigs[scope];
+    window.localStorage.removeItem(config.storageKey);
+  } catch (err) {
+    console.warn(`clearDraft(${scope}) failed`, err);
+  }
+  state.drafts[scope].lastSavedAt = null;
+  markScopeDirty(scope, false);
+}
+
+function hasDirtyForms() {
+  return state.drafts.default.dirty || state.drafts.version.dirty;
+}
+
+function confirmDiscard(scope, actionLabel) {
+  if (!state.drafts[scope].dirty) return true;
+  return window.confirm(`มีข้อมูล ${scope === "default" ? "Default" : "Version"} ที่ยังไม่บันทึก ต้องการ${actionLabel}หรือไม่?`);
+}
+
+function tryRestoreDraft(scope) {
+  try {
+    const config = formScopeConfigs[scope];
+    const raw = window.localStorage.getItem(config.storageKey);
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.data) return;
+
+    const updatedAtText = formatDate(parsed.updatedAt);
+    const confirmed = window.confirm(
+      `พบ Draft ของ${scope === "default" ? " Default" : " Version"} (ล่าสุด ${updatedAtText})\nต้องการกู้คืนหรือไม่?`
+    );
+
+    if (!confirmed) return;
+
+    applyScopeSnapshot(scope, parsed.data);
+    state.drafts[scope].lastSavedAt = parsed.updatedAt || null;
+    markScopeDirty(scope, true);
+    showToast(`กู้คืน Draft ${scope === "default" ? "Default" : "Version"} แล้ว`, "ok");
+  } catch (err) {
+    console.warn(`tryRestoreDraft(${scope}) failed`, err);
+  }
+}
+
+function detectDelimiter(line) {
+  const tabCount = (line.match(/\t/g) || []).length;
+  if (tabCount > 0) return "\t";
+
+  const semicolonCount = (line.match(/;/g) || []).length;
+  const commaCount = (line.match(/,/g) || []).length;
+  return semicolonCount > commaCount ? ";" : ",";
+}
+
+function parseDelimitedLine(line, delimiter) {
+  if (delimiter === "\t") {
+    return String(line || "").split("\t").map((value) => value.trim());
+  }
+
+  const values = [];
+  let current = "";
+  let inQuotes = false;
+
+  const raw = String(line || "");
+  for (let i = 0; i < raw.length; i += 1) {
+    const char = raw[i];
+
+    if (char === '"') {
+      const next = raw[i + 1];
+      if (inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === delimiter && !inQuotes) {
+      values.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  values.push(current.trim());
+  return values;
+}
+
+function parseTabularText(text) {
+  const lines = String(text || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .filter((line) => line.trim().length > 0);
+
+  if (lines.length === 0) {
+    throw new Error("ไม่พบข้อมูลในคลิปบอร์ด");
+  }
+
+  const delimiter = detectDelimiter(lines[0]);
+  const rawHeaders = parseDelimitedLine(lines[0], delimiter);
+
+  if (rawHeaders.length === 0) {
+    throw new Error("ไม่พบหัวตาราง");
+  }
+
+  const headers = [];
+  rawHeaders.forEach((header, index) => {
+    const fallback = `column_${index + 1}`;
+    const normalized = makeUniqueColumnName(header || fallback, headers);
+    headers.push(normalized || fallback);
+  });
+
+  const result = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const values = parseDelimitedLine(lines[i], delimiter);
+    const nonEmpty = values.some((value) => String(value || "").trim() !== "");
+    if (!nonEmpty) continue;
+
+    const row = {};
+    headers.forEach((header, colIndex) => {
+      row[header] = normalizeCellValue(values[colIndex] ?? "");
+    });
+
+    result.push(row);
+  }
+
+  return result;
+}
+
+function downloadJSONFile(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function renderSheetEditor(editorKey) {
+  const config = sheetEditorConfigs[editorKey];
+  const editor = state.sheetEditors[editorKey];
+
+  qs(config.modeTableBtn).classList.toggle("active", editor.mode === "table");
+  qs(config.modeJsonBtn).classList.toggle("active", editor.mode === "json");
+  qs(config.tablePanel).classList.toggle("active", editor.mode === "table");
+  qs(config.jsonPanel).classList.toggle("active", editor.mode === "json");
+
+  qs(config.stats).textContent = `${editor.columns.length} คอลัมน์ • ${editor.rows.length} แถว`;
+
+  const emptyEl = qs(config.empty);
+  if (editor.columns.length === 0) {
+    emptyEl.classList.remove("hidden");
+    qs(config.head).innerHTML = "";
+    qs(config.body).innerHTML = "";
+    return;
+  }
+
+  emptyEl.classList.add("hidden");
+
+  const headerCells = editor.columns
+    .map((column, colIndex) => {
+      return `
+        <th>
+          <div class="sheet-col-head">
+            <input
+              class="sheet-col-name"
+              data-role="column-name"
+              data-col-index="${colIndex}"
+              value="${escapeHtml(column)}"
+            >
+            <button class="sheet-action-btn danger" data-role="remove-column" data-col-index="${colIndex}" type="button">ลบ</button>
+          </div>
+        </th>
+      `;
+    })
+    .join("");
+
+  qs(config.head).innerHTML = `
+    <tr>
+      <th class="row-index-head">#</th>
+      ${headerCells}
+      <th>จัดการ</th>
+    </tr>
+  `;
+
+  if (editor.rows.length === 0) {
+    qs(config.body).innerHTML = `<tr><td colspan="${editor.columns.length + 2}">ยังไม่มีข้อมูล กด \"+ แถว\" เพื่อเพิ่มข้อมูล</td></tr>`;
+    return;
+  }
+
+  const bodyRows = editor.rows
+    .map((row, rowIndex) => {
+      const cells = editor.columns
+        .map((column, colIndex) => {
+          return `
+            <td>
+              <input
+                class="sheet-cell"
+                data-role="cell"
+                data-row-index="${rowIndex}"
+                data-col-index="${colIndex}"
+                value="${escapeHtml(normalizeCellValue(row[column]))}"
+              >
+            </td>
+          `;
+        })
+        .join("");
+
+      return `
+        <tr data-row-index="${rowIndex}">
+          <td class="sheet-row-index">${rowIndex + 1}</td>
+          ${cells}
+          <td>
+            <div class="sheet-row-actions">
+              <button class="sheet-action-btn" data-role="duplicate-row" data-row-index="${rowIndex}" type="button">ซ้ำ</button>
+              <button class="sheet-action-btn danger" data-role="remove-row" data-row-index="${rowIndex}" type="button">ลบ</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  qs(config.body).innerHTML = bodyRows;
+}
+
+function setSheetEditorMode(editorKey, mode) {
+  const editor = state.sheetEditors[editorKey];
+  if (mode !== "table" && mode !== "json") return;
+
+  editor.mode = mode;
+  if (mode === "json") {
+    syncTableToJson(editorKey);
+  }
+  renderSheetEditor(editorKey);
+}
+
+function syncTableToJson(editorKey, showSuccess = false) {
+  const config = sheetEditorConfigs[editorKey];
+  const data = sheetEditorToArray(editorKey);
+  qs(config.jsonInput).value = JSON.stringify(data, null, 2);
+  if (showSuccess) {
+    showToast("อัปเดต JSON จากตารางแล้ว", "ok");
+  }
+}
+
+function setSheetEditorData(editorKey, sheetData, preserveMode = false) {
+  const editor = state.sheetEditors[editorKey];
+  const mode = preserveMode ? editor.mode : "table";
+
+  const model = buildTableModelFromSheetData(sheetData);
+  editor.columns = model.columns;
+  editor.rows = model.rows;
+  editor.mode = mode;
+
+  syncTableToJson(editorKey);
+  renderSheetEditor(editorKey);
+}
+
+function applyJsonToEditor(editorKey, showSuccess = false) {
+  const config = sheetEditorConfigs[editorKey];
+  const parsed = parseSheetJsonText(qs(config.jsonInput).value);
+  setSheetEditorData(editorKey, parsed, true);
+  touchScope(editorKey);
+
+  if (showSuccess) {
+    showToast("นำ JSON เข้า Table สำเร็จ", "ok");
+  }
+}
+
+function addSheetColumn(editorKey) {
+  const editor = state.sheetEditors[editorKey];
+  const defaultName = `column_${editor.columns.length + 1}`;
+  const rawName = window.prompt("ชื่อคอลัมน์ใหม่", defaultName);
+  if (rawName === null) return;
+
+  const normalized = makeUniqueColumnName(rawName, editor.columns);
+  if (!normalized) {
+    showToast("ชื่อคอลัมน์ห้ามว่าง", "err");
+    return;
+  }
+
+  editor.columns.push(normalized);
+  editor.rows.forEach((row) => {
+    row[normalized] = "";
+  });
+
+  syncTableToJson(editorKey);
+  renderSheetEditor(editorKey);
+  touchScope(editorKey);
+}
+
+function addSheetRow(editorKey) {
+  const editor = state.sheetEditors[editorKey];
+  if (editor.columns.length === 0) {
+    showToast("เพิ่มคอลัมน์ก่อนเพิ่มแถว", "err");
+    return;
+  }
+
+  const row = {};
+  editor.columns.forEach((column) => {
+    row[column] = "";
+  });
+  editor.rows.push(row);
+
+  syncTableToJson(editorKey);
+  renderSheetEditor(editorKey);
+  touchScope(editorKey);
+}
+
+function duplicateSheetRow(editorKey, rowIndex) {
+  const editor = state.sheetEditors[editorKey];
+  const row = editor.rows[rowIndex];
+  if (!row) return;
+
+  const clone = {};
+  editor.columns.forEach((column) => {
+    clone[column] = normalizeCellValue(row[column]);
+  });
+
+  editor.rows.splice(rowIndex + 1, 0, clone);
+
+  syncTableToJson(editorKey);
+  renderSheetEditor(editorKey);
+  touchScope(editorKey);
+}
+
+function removeSheetRow(editorKey, rowIndex) {
+  const editor = state.sheetEditors[editorKey];
+  editor.rows = editor.rows.filter((_, idx) => idx !== rowIndex);
+
+  syncTableToJson(editorKey);
+  renderSheetEditor(editorKey);
+  touchScope(editorKey);
+}
+
+function removeSheetColumn(editorKey, colIndex) {
+  const editor = state.sheetEditors[editorKey];
+  const removed = editor.columns[colIndex];
+  if (!removed) return;
+
+  const confirmDelete = window.confirm(`ต้องการลบคอลัมน์ ${removed} หรือไม่?`);
+  if (!confirmDelete) return;
+
+  editor.columns = editor.columns.filter((_, idx) => idx !== colIndex);
+  editor.rows.forEach((row) => {
+    delete row[removed];
+  });
+
+  syncTableToJson(editorKey);
+  renderSheetEditor(editorKey);
+  touchScope(editorKey);
+}
+
+function renameSheetColumn(editorKey, colIndex, rawName) {
+  const editor = state.sheetEditors[editorKey];
+  const oldName = editor.columns[colIndex];
+  if (!oldName) return;
+
+  const normalized = makeUniqueColumnName(rawName, editor.columns, colIndex);
+  if (!normalized) {
+    showToast("ชื่อคอลัมน์ห้ามว่าง", "err");
+    renderSheetEditor(editorKey);
+    return;
+  }
+
+  if (normalized === oldName) {
+    renderSheetEditor(editorKey);
+    return;
+  }
+
+  editor.columns[colIndex] = normalized;
+  editor.rows.forEach((row) => {
+    row[normalized] = row[oldName] ?? "";
+    delete row[oldName];
+  });
+
+  syncTableToJson(editorKey);
+  renderSheetEditor(editorKey);
+  touchScope(editorKey);
+}
+
+function updateSheetCell(editorKey, rowIndex, colIndex, value) {
+  const editor = state.sheetEditors[editorKey];
+  const row = editor.rows[rowIndex];
+  const column = editor.columns[colIndex];
+  if (!row || !column) return;
+
+  row[column] = value;
+  syncTableToJson(editorKey);
+  touchScope(editorKey);
+}
+
+async function pasteSheetFromClipboard(editorKey) {
+  let rawText = "";
+
+  try {
+    rawText = await navigator.clipboard.readText();
+  } catch (err) {
+    rawText = window.prompt("วางข้อมูลตาราง (CSV/TSV) โดยแถวแรกเป็นหัวคอลัมน์", "") || "";
+  }
+
+  if (!rawText.trim()) {
+    showToast("ไม่พบข้อมูลในคลิปบอร์ด", "err");
+    return;
+  }
+
+  try {
+    const sheetData = parseTabularText(rawText);
+    setSheetEditorData(editorKey, sheetData);
+    touchScope(editorKey);
+    showToast(`นำเข้าจากคลิปบอร์ดแล้ว ${sheetData.length} แถว`, "ok");
+  } catch (err) {
+    showToast(err.message, "err");
+  }
+}
+
+function clearSheetData(editorKey) {
+  const confirmed = window.confirm("ต้องการล้างตารางทั้งหมดหรือไม่?");
+  if (!confirmed) return;
+
+  setSheetEditorData(editorKey, []);
+  touchScope(editorKey);
+}
+
+function exportSheetData(editorKey) {
+  const data = sheetEditorToArray(editorKey);
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  downloadJSONFile(`${editorKey}-sheet-data-${stamp}.json`, data);
+  showToast("Export JSON สำเร็จ", "ok");
+}
+
+function collectSheetDataForSave(editorKey) {
+  const editor = state.sheetEditors[editorKey];
+  if (editor.mode === "json") {
+    const config = sheetEditorConfigs[editorKey];
+    const parsed = parseSheetJsonText(qs(config.jsonInput).value);
+    setSheetEditorData(editorKey, parsed, true);
+    return parsed;
+  }
+
+  const data = sheetEditorToArray(editorKey);
+  syncTableToJson(editorKey);
+  return data;
+}
+
 function loadDefaultToForm() {
   const d = state.defaultData || {};
-  qs("defaultName").value = d.name || "Default Instruction";
-  qs("defaultDesc").value = d.description || "";
-  qs("defaultSource").value = d.source || "manual";
-  qs("defaultGoogleDoc").value = d.googleDoc || "";
-  qs("defaultSheetJson").value = JSON.stringify(d.sheetData || [], null, 2);
-  qs("defaultStatic").value = d.staticInstructions || "";
+
+  withHydration(() => {
+    qs("defaultName").value = d.name || "Default Instruction";
+    qs("defaultDesc").value = d.description || "";
+    qs("defaultSource").value = d.source || "manual";
+    qs("defaultGoogleDoc").value = d.googleDoc || "";
+    qs("defaultStatic").value = d.staticInstructions || "";
+    setSheetEditorData("default", d.sheetData || []);
+  });
+
+  markScopeDirty("default", false);
+}
+
+function populateVersionFromDefault() {
+  if (!state.defaultData) {
+    showToast("ยังไม่มี Default ให้คัดลอก", "err");
+    return;
+  }
+
+  withHydration(() => {
+    qs("versionId").value = "";
+    qs("versionName").value = `${state.defaultData.name || "Default"} - copy`;
+    qs("versionDesc").value = state.defaultData.description || "";
+    qs("versionGoogleDoc").value = state.defaultData.googleDoc || "";
+    qs("versionStatic").value = state.defaultData.staticInstructions || "";
+    setSheetEditorData("version", state.defaultData.sheetData || []);
+  });
+
+  touchScope("version");
+  showToast("คัดลอกข้อมูลจาก Default มาให้แล้ว", "ok");
 }
 
 function getVersionById(id) {
@@ -136,11 +923,11 @@ function renderVersions() {
           <td>${formatDate(v.updatedAt)}</td>
           <td>
             <div class="tiny-actions">
-              <button data-act="edit" data-id="${v.id}">Edit</button>
-              <button data-act="duplicate" data-id="${v.id}">Duplicate</button>
-              <button data-act="activate" data-id="${v.id}" ${v.isActive ? "disabled" : ""}>Activate</button>
-              <button data-act="export" data-id="${v.id}">Export</button>
-              <button data-act="delete" data-id="${v.id}">Delete</button>
+              <button data-act="edit" data-id="${v.id}" type="button">Edit</button>
+              <button data-act="duplicate" data-id="${v.id}" type="button">Duplicate</button>
+              <button data-act="activate" data-id="${v.id}" ${v.isActive ? "disabled" : ""} type="button">Activate</button>
+              <button data-act="export" data-id="${v.id}" type="button">Export</button>
+              <button data-act="delete" data-id="${v.id}" type="button">Delete</button>
             </div>
           </td>
         </tr>
@@ -160,21 +947,29 @@ function renderVersions() {
 }
 
 function resetVersionForm() {
-  qs("versionId").value = "";
-  qs("versionName").value = "";
-  qs("versionDesc").value = "";
-  qs("versionGoogleDoc").value = "";
-  qs("versionSheetJson").value = "[]";
-  qs("versionStatic").value = "";
+  withHydration(() => {
+    qs("versionId").value = "";
+    qs("versionName").value = "";
+    qs("versionDesc").value = "";
+    qs("versionGoogleDoc").value = "";
+    qs("versionStatic").value = "";
+    setSheetEditorData("version", []);
+  });
+
+  markScopeDirty("version", false);
 }
 
 function fillVersionForm(version) {
-  qs("versionId").value = version.id || "";
-  qs("versionName").value = version.name || "";
-  qs("versionDesc").value = version.description || "";
-  qs("versionGoogleDoc").value = version.googleDoc || "";
-  qs("versionSheetJson").value = JSON.stringify(version.sheetData || [], null, 2);
-  qs("versionStatic").value = version.staticInstructions || "";
+  withHydration(() => {
+    qs("versionId").value = version.id || "";
+    qs("versionName").value = version.name || "";
+    qs("versionDesc").value = version.description || "";
+    qs("versionGoogleDoc").value = version.googleDoc || "";
+    qs("versionStatic").value = version.staticInstructions || "";
+    setSheetEditorData("version", version.sheetData || []);
+  });
+
+  markScopeDirty("version", false);
 }
 
 function renderFollowups() {
@@ -187,7 +982,7 @@ function renderFollowups() {
           <td><input type="number" data-role="delay" value="${r.delayMinutes}"></td>
           <td><textarea data-role="message" rows="2">${escapeHtml(r.message)}</textarea></td>
           <td><input type="checkbox" data-role="active" ${r.isActive ? "checked" : ""}></td>
-          <td><button data-role="remove">ลบ</button></td>
+          <td><button data-role="remove" type="button">ลบ</button></td>
         </tr>
       `;
     })
@@ -230,8 +1025,8 @@ function renderImages() {
             <strong>${escapeHtml(img.name || img.key)}</strong>
             <code>[IMG:${escapeHtml(img.key)}]</code>
             <div class="tiny-actions">
-              <button data-img-act="copy" data-key="${img.key}">Copy Token</button>
-              <button data-img-act="delete" data-key="${img.key}">Delete</button>
+              <button data-img-act="copy" data-key="${img.key}" type="button">Copy Token</button>
+              <button data-img-act="delete" data-key="${img.key}" type="button">Delete</button>
             </div>
           </div>
         </article>
@@ -265,10 +1060,9 @@ async function refreshAll() {
 async function saveDefault() {
   let sheetData = [];
   try {
-    sheetData = JSON.parse(qs("defaultSheetJson").value);
-    if (!Array.isArray(sheetData)) throw new Error("sheetData must be array");
+    sheetData = collectSheetDataForSave("default");
   } catch (err) {
-    showToast("Sheet Data JSON ไม่ถูกต้อง", "err");
+    showToast(err.message, "err");
     return;
   }
 
@@ -287,6 +1081,8 @@ async function saveDefault() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+
+  clearDraft("default");
   showToast("บันทึก Default สำเร็จ", "ok");
   await refreshAll();
 }
@@ -301,10 +1097,9 @@ async function saveVersion() {
 
   let sheetData = [];
   try {
-    sheetData = JSON.parse(qs("versionSheetJson").value);
-    if (!Array.isArray(sheetData)) throw new Error("sheetData must be array");
+    sheetData = collectSheetDataForSave("version");
   } catch (err) {
-    showToast("Sheet Data JSON ของเวอร์ชันไม่ถูกต้อง", "err");
+    showToast(err.message, "err");
     return;
   }
 
@@ -331,6 +1126,7 @@ async function saveVersion() {
     qs("versionId").value = created.id || "";
   }
 
+  clearDraft("version");
   showToast("บันทึกเวอร์ชันสำเร็จ", "ok");
   await refreshAll();
 }
@@ -357,8 +1153,7 @@ async function importVersion() {
 async function buildPreview() {
   const source = qs("buildSource").value;
   const format = qs("buildFormat").value;
-  const version =
-    source === "default" ? state.defaultData : getVersionById(source);
+  const version = source === "default" ? state.defaultData : getVersionById(source);
 
   if (!version) {
     showToast("ไม่พบ source ที่เลือก", "err");
@@ -387,11 +1182,13 @@ async function saveFollowups() {
     showToast("ไม่มี follow-up rule ให้บันทึก", "err");
     return;
   }
+
   await fetchJSON("/api/followups", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rules: rows }),
   });
+
   showToast("บันทึก Follow-up สำเร็จ", "ok");
   await refreshAll();
 }
@@ -409,6 +1206,7 @@ async function uploadImage() {
     showToast("กรุณาระบุ key รูป", "err");
     return;
   }
+
   const name = qs("imageName").value.trim() || key;
   const category = qs("imageCategory").value.trim() || "general";
 
@@ -424,12 +1222,117 @@ async function uploadImage() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ base64, key, name, category }),
   });
+
   fileInput.value = "";
   qs("imageName").value = "";
   showToast("อัปโหลดรูปสำเร็จ", "ok");
+
   state.images = await fetchJSON("/api/images");
   renderImages();
   updateDashboard();
+}
+
+function bindScopeDirtyTracking() {
+  ["defaultName", "defaultDesc", "defaultGoogleDoc", "defaultStatic"].forEach((id) => {
+    qs(id).addEventListener("input", () => touchScope("default"));
+  });
+  qs("defaultSource").addEventListener("change", () => touchScope("default"));
+
+  ["versionName", "versionDesc", "versionGoogleDoc", "versionStatic"].forEach((id) => {
+    qs(id).addEventListener("input", () => touchScope("version"));
+  });
+}
+
+function bindSheetEditorEvents(editorKey) {
+  const config = sheetEditorConfigs[editorKey];
+
+  qs(config.modeTableBtn).addEventListener("click", () => setSheetEditorMode(editorKey, "table"));
+  qs(config.modeJsonBtn).addEventListener("click", () => setSheetEditorMode(editorKey, "json"));
+
+  qs(config.addColumnBtn).addEventListener("click", () => addSheetColumn(editorKey));
+  qs(config.addRowBtn).addEventListener("click", () => addSheetRow(editorKey));
+  qs(config.pasteBtn).addEventListener("click", () => pasteSheetFromClipboard(editorKey));
+
+  qs(config.syncToJsonBtn).addEventListener("click", () => {
+    syncTableToJson(editorKey, true);
+    setSheetEditorMode(editorKey, "json");
+  });
+
+  qs(config.syncFromJsonBtn).addEventListener("click", () => {
+    try {
+      applyJsonToEditor(editorKey, true);
+    } catch (err) {
+      showToast(err.message, "err");
+    }
+  });
+
+  qs(config.exportJsonBtn).addEventListener("click", () => exportSheetData(editorKey));
+  qs(config.clearBtn).addEventListener("click", () => clearSheetData(editorKey));
+
+  qs(config.jsonInput).addEventListener("input", () => touchScope(editorKey));
+
+  qs(config.head).addEventListener("change", (event) => {
+    const target = event.target.closest('[data-role="column-name"]');
+    if (!target) return;
+    const colIndex = Number.parseInt(target.dataset.colIndex, 10);
+    renameSheetColumn(editorKey, colIndex, target.value);
+  });
+
+  qs(config.head).addEventListener("click", (event) => {
+    const target = event.target.closest('button[data-role="remove-column"]');
+    if (!target) return;
+    const colIndex = Number.parseInt(target.dataset.colIndex, 10);
+    removeSheetColumn(editorKey, colIndex);
+  });
+
+  qs(config.body).addEventListener("input", (event) => {
+    const target = event.target.closest('input[data-role="cell"]');
+    if (!target) return;
+    const rowIndex = Number.parseInt(target.dataset.rowIndex, 10);
+    const colIndex = Number.parseInt(target.dataset.colIndex, 10);
+    updateSheetCell(editorKey, rowIndex, colIndex, target.value);
+  });
+
+  qs(config.body).addEventListener("click", (event) => {
+    const duplicateBtn = event.target.closest('button[data-role="duplicate-row"]');
+    if (duplicateBtn) {
+      const rowIndex = Number.parseInt(duplicateBtn.dataset.rowIndex, 10);
+      duplicateSheetRow(editorKey, rowIndex);
+      return;
+    }
+
+    const removeBtn = event.target.closest('button[data-role="remove-row"]');
+    if (!removeBtn) return;
+    const rowIndex = Number.parseInt(removeBtn.dataset.rowIndex, 10);
+    removeSheetRow(editorKey, rowIndex);
+  });
+}
+
+function bindGlobalShortcuts() {
+  document.addEventListener("keydown", (event) => {
+    const isSaveShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s";
+    if (!isSaveShortcut) return;
+
+    const activeView = getActiveViewId();
+    if (activeView !== "default" && activeView !== "versions") {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (activeView === "default") {
+      saveDefault().catch((err) => showToast(err.message, "err"));
+      return;
+    }
+
+    saveVersion().catch((err) => showToast(err.message, "err"));
+  });
+
+  window.addEventListener("beforeunload", (event) => {
+    if (!hasDirtyForms()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
 }
 
 function bindEvents() {
@@ -437,7 +1340,15 @@ function bindEvents() {
     button.addEventListener("click", () => switchView(button.dataset.view));
   });
 
+  bindScopeDirtyTracking();
+  bindSheetEditorEvents("default");
+  bindSheetEditorEvents("version");
+  bindGlobalShortcuts();
+
   qs("refreshAllBtn").addEventListener("click", async () => {
+    if (!confirmDiscard("default", "รีเฟรชข้อมูล") || !confirmDiscard("version", "รีเฟรชข้อมูล")) {
+      return;
+    }
     await refreshAll();
     showToast("รีเฟรชข้อมูลแล้ว", "ok");
   });
@@ -445,13 +1356,28 @@ function bindEvents() {
   qs("saveDefaultBtn").addEventListener("click", () =>
     saveDefault().catch((err) => showToast(err.message, "err"))
   );
-  qs("reloadDefaultBtn").addEventListener("click", () => loadDefaultToForm());
+
+  qs("reloadDefaultBtn").addEventListener("click", () => {
+    if (!confirmDiscard("default", "โหลดข้อมูลใหม่")) return;
+    loadDefaultToForm();
+  });
 
   qs("versionsSearch").addEventListener("input", renderVersions);
-  qs("newVersionBtn").addEventListener("click", resetVersionForm);
+
+  qs("newVersionBtn").addEventListener("click", () => {
+    if (!confirmDiscard("version", "ล้างฟอร์มเวอร์ชัน")) return;
+    resetVersionForm();
+  });
+
+  qs("createFromDefaultBtn").addEventListener("click", () => {
+    if (!confirmDiscard("version", "แทนที่ฟอร์มด้วย Default")) return;
+    populateVersionFromDefault();
+  });
+
   qs("saveVersionBtn").addEventListener("click", () =>
     saveVersion().catch((err) => showToast(err.message, "err"))
   );
+
   qs("importVersionBtn").addEventListener("click", () =>
     importVersion().catch((err) => showToast(err.message, "err"))
   );
@@ -464,8 +1390,11 @@ function bindEvents() {
     if (!id || !act) return;
 
     if (act === "edit") {
+      if (!confirmDiscard("version", "เปิดเวอร์ชันอื่น")) return;
       const version = getVersionById(id);
-      if (version) fillVersionForm(version);
+      if (version) {
+        fillVersionForm(version);
+      }
       return;
     }
 
@@ -521,6 +1450,7 @@ function bindEvents() {
   qs("saveFollowupsBtn").addEventListener("click", () =>
     saveFollowups().catch((err) => showToast(err.message, "err"))
   );
+
   qs("followupTableBody").addEventListener("click", (event) => {
     const target = event.target.closest("button");
     if (!target || target.dataset.role !== "remove") return;
@@ -530,6 +1460,7 @@ function bindEvents() {
   qs("uploadImageBtn").addEventListener("click", () =>
     uploadImage().catch((err) => showToast(err.message, "err"))
   );
+
   qs("reloadImagesBtn").addEventListener("click", async () => {
     state.images = await fetchJSON("/api/images");
     renderImages();
@@ -540,6 +1471,7 @@ function bindEvents() {
   qs("imageGrid").addEventListener("click", async (event) => {
     const target = event.target.closest("button");
     if (!target) return;
+
     const key = target.dataset.key;
     const act = target.dataset.imgAct;
     if (!key || !act) return;
@@ -549,6 +1481,7 @@ function bindEvents() {
       showToast("คัดลอก token แล้ว", "ok");
       return;
     }
+
     if (act === "delete") {
       const confirmDelete = window.confirm(`ต้องการลบรูป ${key} หรือไม่?`);
       if (!confirmDelete) return;
@@ -563,7 +1496,13 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  updateDirtyChip("default");
+  updateDirtyChip("version");
+
   await refreshAll();
+
+  tryRestoreDraft("default");
+  tryRestoreDraft("version");
 }
 
 window.addEventListener("DOMContentLoaded", () => {

@@ -69,49 +69,102 @@
       </section>
 
       <section class="view" id="defaultView">
-        <div class="panel">
+        <div class="panel instruction-panel">
           <div class="panel-head">
             <h3>Default Instruction (DB)</h3>
             <div class="row-inline">
-              <button class="btn ghost" id="reloadDefaultBtn">โหลดใหม่</button>
-              <button class="btn primary" id="saveDefaultBtn">บันทึก</button>
+              <span class="chip subtle ok" id="defaultDirtyChip">บันทึกแล้ว</span>
+              <button class="btn ghost" id="reloadDefaultBtn" type="button">โหลดใหม่</button>
+              <button class="btn primary" id="saveDefaultBtn" type="button">บันทึก</button>
             </div>
           </div>
+          <p class="hint-line">ลัดคีย์บอร์ด: <code>Ctrl/Cmd + S</code> เพื่อบันทึกฟอร์มที่กำลังเปิดอยู่</p>
 
-          <div class="form-grid two">
-            <label>
-              <span>ชื่อ</span>
-              <input id="defaultName" type="text" placeholder="Default Instruction">
-            </label>
-            <label>
-              <span>คำอธิบาย</span>
-              <input id="defaultDesc" type="text" placeholder="คำอธิบาย">
-            </label>
+          <div class="instruction-workbench">
+            <article class="work-block">
+              <h4>ข้อมูลหลัก</h4>
+              <p class="work-note">กำหนด metadata และ source ของ default instruction</p>
+              <div class="form-grid two">
+                <label>
+                  <span>ชื่อ</span>
+                  <input id="defaultName" type="text" placeholder="Default Instruction">
+                </label>
+                <label>
+                  <span>คำอธิบาย</span>
+                  <input id="defaultDesc" type="text" placeholder="คำอธิบาย">
+                </label>
+              </div>
+
+              <label>
+                <span>Source</span>
+                <select id="defaultSource">
+                  <option value="manual">manual</option>
+                  <option value="code">code</option>
+                  <option value="google">google</option>
+                </select>
+              </label>
+            </article>
+
+            <article class="work-block">
+              <h4>Google Doc Content</h4>
+              <p class="work-note">ข้อความหลักจากเอกสาร สามารถแก้ไขตรงนี้ก่อนบันทึกลงฐานข้อมูล</p>
+              <label>
+                <span>Google Doc Content</span>
+                <textarea id="defaultGoogleDoc" rows="10"></textarea>
+              </label>
+            </article>
+
+            <article class="work-block">
+              <div class="work-head-row">
+                <h4>Sheet Data Composer</h4>
+                <span class="chip subtle" id="defaultSheetStats">0 คอลัมน์ • 0 แถว</span>
+              </div>
+              <p class="work-note">แก้ไขผ่านตารางหรือ JSON ได้ โดยหลังบ้านเก็บเป็น JSON array เสมอ</p>
+              <div class="sheet-editor" data-editor="default">
+                <div class="sheet-toolbar">
+                  <div class="segmented">
+                    <button class="seg-btn active" id="defaultSheetModeTable" type="button">Table</button>
+                    <button class="seg-btn" id="defaultSheetModeJson" type="button">JSON</button>
+                  </div>
+                  <div class="row-inline wrap">
+                    <button class="btn ghost small" id="defaultSheetAddColumn" type="button">+ คอลัมน์</button>
+                    <button class="btn ghost small" id="defaultSheetAddRow" type="button">+ แถว</button>
+                    <button class="btn ghost small" id="defaultSheetPasteTable" type="button">วางจากคลิปบอร์ด</button>
+                    <button class="btn ghost small" id="defaultSheetSyncToJson" type="button">อัปเดต JSON</button>
+                    <button class="btn ghost small" id="defaultSheetSyncFromJson" type="button">ใช้ JSON นี้</button>
+                    <button class="btn ghost small" id="defaultSheetExportJson" type="button">Export JSON</button>
+                    <button class="btn ghost small danger-text" id="defaultSheetClear" type="button">ล้างตาราง</button>
+                  </div>
+                </div>
+
+                <div class="sheet-mode-panel active" id="defaultSheetTablePanel">
+                  <p class="sheet-empty" id="defaultSheetEmpty">ยังไม่มีคอลัมน์ เริ่มด้วยการเพิ่มคอลัมน์ก่อนสร้างแถวข้อมูล</p>
+                  <div class="table-wrap">
+                    <table class="sheet-table">
+                      <thead id="defaultSheetHead"></thead>
+                      <tbody id="defaultSheetBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="sheet-mode-panel" id="defaultSheetJsonPanel">
+                  <label>
+                    <span>Sheet Data JSON</span>
+                    <textarea id="defaultSheetJson" class="mono" rows="12"></textarea>
+                  </label>
+                </div>
+              </div>
+            </article>
+
+            <article class="work-block">
+              <h4>Static Instructions</h4>
+              <p class="work-note">ข้อกำหนดเสริมที่จะถูกต่อท้าย instruction ทุกครั้ง</p>
+              <label>
+                <span>Static Instructions</span>
+                <textarea id="defaultStatic" rows="8"></textarea>
+              </label>
+            </article>
           </div>
-
-          <label>
-            <span>Source</span>
-            <select id="defaultSource">
-              <option value="manual">manual</option>
-              <option value="code">code</option>
-              <option value="google">google</option>
-            </select>
-          </label>
-
-          <label>
-            <span>Google Doc Content</span>
-            <textarea id="defaultGoogleDoc" rows="10"></textarea>
-          </label>
-
-          <label>
-            <span>Sheet Data JSON</span>
-            <textarea id="defaultSheetJson" class="mono" rows="10"></textarea>
-          </label>
-
-          <label>
-            <span>Static Instructions</span>
-            <textarea id="defaultStatic" rows="8"></textarea>
-          </label>
         </div>
       </section>
 
@@ -121,7 +174,7 @@
             <h3>เวอร์ชันทั้งหมด</h3>
             <div class="row-inline">
               <input id="versionsSearch" type="search" placeholder="ค้นหาเวอร์ชัน...">
-              <button class="btn ghost" id="importVersionBtn">Import JSON</button>
+              <button class="btn ghost" id="importVersionBtn" type="button">Import JSON</button>
             </div>
           </div>
 
@@ -140,41 +193,93 @@
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel instruction-panel">
           <div class="panel-head">
             <h3>แก้ไข/สร้างเวอร์ชัน</h3>
             <div class="row-inline">
-              <button class="btn ghost" id="newVersionBtn">สร้างใหม่</button>
-              <button class="btn primary" id="saveVersionBtn">บันทึกเวอร์ชัน</button>
+              <span class="chip subtle ok" id="versionDirtyChip">บันทึกแล้ว</span>
+              <button class="btn ghost" id="newVersionBtn" type="button">สร้างใหม่</button>
+              <button class="btn ghost" id="createFromDefaultBtn" type="button">ใช้ Default เป็นต้นแบบ</button>
+              <button class="btn primary" id="saveVersionBtn" type="button">บันทึกเวอร์ชัน</button>
             </div>
           </div>
+          <p class="hint-line">ลัดคีย์บอร์ด: <code>Ctrl/Cmd + S</code> เพื่อบันทึกเวอร์ชันปัจจุบัน</p>
 
           <input id="versionId" type="hidden">
-          <div class="form-grid two">
-            <label>
-              <span>ชื่อเวอร์ชัน</span>
-              <input id="versionName" type="text">
-            </label>
-            <label>
-              <span>คำอธิบาย</span>
-              <input id="versionDesc" type="text">
-            </label>
+          <div class="instruction-workbench">
+            <article class="work-block">
+              <h4>ข้อมูลเวอร์ชัน</h4>
+              <p class="work-note">เลือกเวอร์ชันจากตารางด้านบนเพื่อแก้ไข หรือสร้างใหม่ได้ทันที</p>
+              <div class="form-grid two">
+                <label>
+                  <span>ชื่อเวอร์ชัน</span>
+                  <input id="versionName" type="text">
+                </label>
+                <label>
+                  <span>คำอธิบาย</span>
+                  <input id="versionDesc" type="text">
+                </label>
+              </div>
+            </article>
+
+            <article class="work-block">
+              <h4>Google Doc Content</h4>
+              <label>
+                <span>Google Doc Content</span>
+                <textarea id="versionGoogleDoc" rows="8"></textarea>
+              </label>
+            </article>
+
+            <article class="work-block">
+              <div class="work-head-row">
+                <h4>Sheet Data Composer</h4>
+                <span class="chip subtle" id="versionSheetStats">0 คอลัมน์ • 0 แถว</span>
+              </div>
+              <p class="work-note">รองรับทั้ง Table mode และ JSON mode โดยข้อมูลที่บันทึกจะเป็น JSON เดียวกัน</p>
+              <div class="sheet-editor" data-editor="version">
+                <div class="sheet-toolbar">
+                  <div class="segmented">
+                    <button class="seg-btn active" id="versionSheetModeTable" type="button">Table</button>
+                    <button class="seg-btn" id="versionSheetModeJson" type="button">JSON</button>
+                  </div>
+                  <div class="row-inline wrap">
+                    <button class="btn ghost small" id="versionSheetAddColumn" type="button">+ คอลัมน์</button>
+                    <button class="btn ghost small" id="versionSheetAddRow" type="button">+ แถว</button>
+                    <button class="btn ghost small" id="versionSheetPasteTable" type="button">วางจากคลิปบอร์ด</button>
+                    <button class="btn ghost small" id="versionSheetSyncToJson" type="button">อัปเดต JSON</button>
+                    <button class="btn ghost small" id="versionSheetSyncFromJson" type="button">ใช้ JSON นี้</button>
+                    <button class="btn ghost small" id="versionSheetExportJson" type="button">Export JSON</button>
+                    <button class="btn ghost small danger-text" id="versionSheetClear" type="button">ล้างตาราง</button>
+                  </div>
+                </div>
+
+                <div class="sheet-mode-panel active" id="versionSheetTablePanel">
+                  <p class="sheet-empty" id="versionSheetEmpty">ยังไม่มีคอลัมน์ เริ่มด้วยการเพิ่มคอลัมน์ก่อนสร้างแถวข้อมูล</p>
+                  <div class="table-wrap">
+                    <table class="sheet-table">
+                      <thead id="versionSheetHead"></thead>
+                      <tbody id="versionSheetBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="sheet-mode-panel" id="versionSheetJsonPanel">
+                  <label>
+                    <span>Sheet Data JSON</span>
+                    <textarea id="versionSheetJson" class="mono" rows="10"></textarea>
+                  </label>
+                </div>
+              </div>
+            </article>
+
+            <article class="work-block">
+              <h4>Static Instructions</h4>
+              <label>
+                <span>Static Instructions</span>
+                <textarea id="versionStatic" rows="6"></textarea>
+              </label>
+            </article>
           </div>
-
-          <label>
-            <span>Google Doc Content</span>
-            <textarea id="versionGoogleDoc" rows="8"></textarea>
-          </label>
-
-          <label>
-            <span>Sheet Data JSON</span>
-            <textarea id="versionSheetJson" class="mono" rows="8"></textarea>
-          </label>
-
-          <label>
-            <span>Static Instructions</span>
-            <textarea id="versionStatic" rows="6"></textarea>
-          </label>
         </div>
       </section>
 
